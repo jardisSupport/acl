@@ -6,12 +6,7 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
-### Added
-
-- **`AclFilter::COUNT_CAP`** (`int`, `10000`) — fixed limit of the capped total of a filtered list: the total is at most
-  `COUNT_CAP`; above it the answer reports `COUNT_CAP` and carries a marker that the total is capped. Its comment names
-  the counting form: inside `SELECT 1` with the conditions of the page, without column list, without sorting,
-  `limit(COUNT_CAP + 1)`; outside `COUNT(*)`.
+## [0.3.0] - 2026-11-18
 
 ### Changed
 
@@ -26,6 +21,15 @@ versioning follows [SemVer](https://semver.org/).
 
 - **`AclFilter::rowCondition`** and **`AclFilter::recordIds`**, with the closures `Handler/Filter/BuildRowCondition` and
   `Handler/Filter/BuildRecordIds`. Use `existsQuery` with `->exists(...)`.
+
+## [0.2.0] - 2026-11-18
+
+### Added
+
+- **`AclFilter::COUNT_CAP`** (`int`, `10000`) — fixed limit of the capped total of a filtered list: the total is at most
+  `COUNT_CAP`; above it the answer reports `COUNT_CAP` and carries a marker that the total is capped. Its comment names
+  the counting form: inside `SELECT 1` with the conditions of the page, without column list, without sorting,
+  `limit(COUNT_CAP + 1)`; outside `COUNT(*)`.
 
 ## [0.1.0] - 2026-11-18
 
