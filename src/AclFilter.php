@@ -23,6 +23,16 @@ use JardisSupport\Contract\DbQuery\DbQueryBuilderInterface;
  */
 final class AclFilter
 {
+    /**
+     * Fixed limit of the capped total of a filtered list.
+     *
+     * A caller that counts a filtered list counts it capped: `where(key)->in(recordIds(...))`, sorted like the
+     * page, `limit(COUNT_CAP + 1)`, counted from outside with `COUNT(*)`. The total of a filtered list is at
+     * most COUNT_CAP; when the count exceeds it, the answer reports COUNT_CAP and carries a marker that the
+     * total is capped.
+     */
+    public const int COUNT_CAP = 10000;
+
     private readonly Closure $buildRowCondition;
     private readonly Closure $buildRecordIds;
 

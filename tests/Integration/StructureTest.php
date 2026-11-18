@@ -13,6 +13,7 @@ use PHPUnit\Framework\TestCase;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use ReflectionClass;
+use ReflectionClassConstant;
 use ReflectionMethod;
 use ReflectionNamedType;
 
@@ -121,6 +122,15 @@ final class StructureTest extends TestCase
         sort($names);
 
         self::assertSame($expected, $names);
+    }
+
+    public function testTheCountCapOfAFilteredListIsAFixedPublicIntegerOf10000(): void
+    {
+        $constant = new ReflectionClassConstant(AclFilter::class, 'COUNT_CAP');
+
+        self::assertTrue($constant->isPublic());
+        self::assertSame(10000, $constant->getValue());
+        self::assertSame('int', (string) $constant->getType());
     }
 
     /**

@@ -4,6 +4,13 @@ All notable changes to `jardissupport/acl` are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **`AclFilter::COUNT_CAP`** (`int`, `10000`) — fixed limit of the capped total of a filtered list: the total is at most
+  `COUNT_CAP`; above it the answer reports `COUNT_CAP` and carries a marker that the total is capped.
+
 ## [0.1.0] - 2026-11-18
 
 ### Added
