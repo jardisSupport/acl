@@ -98,7 +98,7 @@ final class StructureTest extends TestCase
                     'revoke',
                 ],
             ],
-            'AclFilter' => [AclFilter::class, ['recordIds', 'rowCondition']],
+            'AclFilter' => [AclFilter::class, ['existsQuery']],
             'AclBackfill' => [AclBackfill::class, ['run']],
         ];
     }

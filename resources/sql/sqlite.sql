@@ -8,5 +8,5 @@ CREATE TABLE IF NOT EXISTS acl_entries (
     level     INTEGER NOT NULL,
     PRIMARY KEY (kind, record_id, group_id)
 );
-CREATE INDEX IF NOT EXISTS idx_acl_entries_group ON acl_entries (kind, group_id, level, record_id);
+CREATE INDEX IF NOT EXISTS idx_acl_entries_group_record ON acl_entries (kind, group_id, record_id, level);
 CREATE INDEX IF NOT EXISTS idx_acl_entries_group_id ON acl_entries (group_id);

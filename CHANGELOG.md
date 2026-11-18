@@ -9,7 +9,23 @@ versioning follows [SemVer](https://semver.org/).
 ### Added
 
 - **`AclFilter::COUNT_CAP`** (`int`, `10000`) — fixed limit of the capped total of a filtered list: the total is at most
-  `COUNT_CAP`; above it the answer reports `COUNT_CAP` and carries a marker that the total is capped.
+  `COUNT_CAP`; above it the answer reports `COUNT_CAP` and carries a marker that the total is capped. Its comment names
+  the counting form: inside `SELECT 1` with the conditions of the page, without column list, without sorting,
+  `limit(COUNT_CAP + 1)`; outside `COUNT(*)`.
+
+### Changed
+
+- **`AclFilter`** has one public method, `existsQuery(int $kind, array $groups, AccessLevel $min, string $keyColumn)`:
+  the subquery for `jardissupport/dbquery` `exists()` (`SELECT 1 FROM <table> WHERE kind = ? AND record_id = <outer key>
+  AND group_id IN (...) AND level >= ?`, no limit, no distinct), closure `Handler/Filter/BuildExistsQuery`.
+- **Index `idx_acl_entries_group` is replaced by `idx_acl_entries_group_record`** `(kind, group_id, record_id, level)`
+  (equality columns first, join column, range column last) in `resources/sql/{mysql,pgsql,sqlite}.sql`. An existing table
+  is not upgraded: drop the old index, create the new one (README, "Existing tables are not upgraded").
+
+### Removed
+
+- **`AclFilter::rowCondition`** and **`AclFilter::recordIds`**, with the closures `Handler/Filter/BuildRowCondition` and
+  `Handler/Filter/BuildRecordIds`. Use `existsQuery` with `->exists(...)`.
 
 ## [0.1.0] - 2026-11-18
 

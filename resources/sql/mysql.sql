@@ -7,6 +7,6 @@ CREATE TABLE IF NOT EXISTS acl_entries (
     group_id  BIGINT   NOT NULL,
     level     SMALLINT NOT NULL,
     PRIMARY KEY (kind, record_id, group_id),
-    KEY idx_acl_entries_group (kind, group_id, level, record_id),
+    KEY idx_acl_entries_group_record (kind, group_id, record_id, level),
     KEY idx_acl_entries_group_id (group_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
