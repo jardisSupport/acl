@@ -66,6 +66,8 @@ public function entriesOf(int $kind, int $recordId): array                      
 ### AclFilter
 `final class AclFilter` — needs no connection, runs nothing, returns `DbQueryBuilderInterface` (`jardissupport/contracts`).
 ```php
+public const int COUNT_CAP = 10000;
+
 new AclFilter(string $table = 'acl_entries')
 
 public function rowCondition(int $kind, array $groups, AccessLevel $min, string $keyColumn): DbQueryBuilderInterface
@@ -73,6 +75,7 @@ public function recordIds(int $kind, array $groups, AccessLevel $min): DbQueryBu
 ```
 - `rowCondition`: single-value subquery (`SELECT 1 ... LIMIT 1`) bound to the key column of the outer row; use as `->where(Expression::integer(1))->equals($filter->rowCondition(...))`. Name the key column with the outer alias (`d.id`) when its bare name also exists in the entry table (`kind`, `record_id`, `group_id`, `level`).
 - `recordIds`: key set (`SELECT DISTINCT record_id`) for `->where('d.id')->in($filter->recordIds(...))`; an empty group list yields `1=0` (sees nothing).
+- `COUNT_CAP` (since 0.2.0): fixed limit of the capped total of a filtered list — count as `where(key)->in(recordIds(...))`, sorted like the page, `limit(AclFilter::COUNT_CAP + 1)`, `COUNT(*)` from outside; above the cap the answer reports `COUNT_CAP` with a capped marker (`jardissupport/response` `ReadResult::ofCappedList`). Never hard-code the number.
 - Both give the same set as `AclStore::levelOf`. Needs `jardissupport/dbquery` ≥ 1.3.1 (a subquery value is inlined in every condition, so the filter may stand behind other conditions).
 
 ### AclBackfill
