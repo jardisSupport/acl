@@ -70,23 +70,20 @@ $store->reassignGroup(9, 10);                // moves all entries of group 9 to 
 ```php
 use JardisSupport\Acl\AclFilter;
 use JardisSupport\Acl\Data\AccessLevel;
-use JardisSupport\DbQuery\Data\Expression;
 use JardisSupport\DbQuery\DbQuery;
 
 $filter = new AclFilter();                   // needs no connection, runs nothing
 
-// Form 1: single-value subquery bound to the key column of the outer row
+// One subquery for `exists()`, bound to the key column of the outer row
 $query = (new DbQuery())->select('d.*')->from('documents', 'd')
-    ->where(Expression::integer(1))->equals($filter->rowCondition(7, [9, 12], AccessLevel::View, 'd.id'));
-
-// Form 2: key set
-$query = (new DbQuery())->select('d.*')->from('documents', 'd')
-    ->where('d.id')->in($filter->recordIds(7, [9, 12], AccessLevel::View));
+    ->exists($filter->existsQuery(7, [9, 12], AccessLevel::View, 'd.id'));
 ```
 
-`AclFilter::COUNT_CAP` (`int`, `10000`) is the fixed limit of the capped total of a filtered list: count it as `where(key)->in($filter->recordIds(...))`, sorted like the page, `limit(AclFilter::COUNT_CAP + 1)`, counted from outside with `COUNT(*)`. The total is at most `COUNT_CAP`; when the count exceeds it, report `COUNT_CAP` and mark the total as capped.
+`existsQuery()` builds `SELECT 1 FROM acl_entries WHERE kind = ? AND record_id = <outer key> AND group_id IN (...) AND level >= ?`; the outer key column is compared, not bound. Name it with the alias of the outer table (`d.id`) when its bare name also exists in the entry table. The filter may stand first or behind other conditions, e.g. a tenant column: `->where('d.tenant')->equals('north')->exists(...)`.
 
-Both forms give the same set as `AclStore::levelOf`. An empty group list sees nothing. The filter may stand behind other conditions (e.g. a tenant column) — this needs `jardissupport/dbquery` 1.3.1 or newer.
+`AclFilter::COUNT_CAP` (`int`, `10000`) is the fixed limit of the capped total of a filtered list: count it inside as `SELECT 1` with the conditions of the page (including `exists($filter->existsQuery(...))`), without column list, without sorting, `limit(AclFilter::COUNT_CAP + 1)`, and outside with `COUNT(*)`. The total is at most `COUNT_CAP`; when the count exceeds it, report `COUNT_CAP` and mark the total as capped.
+
+The filter gives the same set as `AclStore::levelOf`. An empty group list sees nothing. The filter may stand behind other conditions (e.g. a tenant column) — this needs `jardissupport/dbquery` 1.3.1 or newer.
 
 ### Backfill Existing Records (`AclBackfill`)
 
@@ -126,14 +123,24 @@ One row per group and record. Created by `resources/sql/{mysql,pgsql,sqlite}.sql
 | Key | Columns | Serves |
 |---|---|---|
 | Primary key | `(kind, record_id, group_id)` | one entry per group and record |
-| `idx_acl_entries_group` | `(kind, group_id, level, record_id)` | `AclFilter`, `levelOf`, `check` |
+| `idx_acl_entries_group_record` | `(kind, group_id, record_id, level)` | `AclFilter`, `levelOf`, `check` |
 | `idx_acl_entries_group_id` | `(group_id)` | `hasEntriesOfGroup`, `reassignGroup` |
 
-**Existing tables are not upgraded.** `CREATE TABLE IF NOT EXISTS` leaves a table that already exists as it is, and the package runs no migration: a table created from an earlier DDL file does not get `idx_acl_entries_group_id` by itself. Add it yourself:
+**Existing tables are not upgraded.** `CREATE TABLE IF NOT EXISTS` leaves a table that already exists as it is, and the package runs no migration: a table created from an earlier DDL file does not get a new index by itself. Add `idx_acl_entries_group_id` (`(group_id)`) if it is missing, and replace the old filter index `idx_acl_entries_group` `(kind, group_id, level, record_id)` by `idx_acl_entries_group_record` `(kind, group_id, record_id, level)` (equality columns first, then the join column `record_id`, the range column `level` last):
 
 ```sql
+-- MySQL / MariaDB
+DROP INDEX idx_acl_entries_group ON acl_entries;
+CREATE INDEX idx_acl_entries_group_record ON acl_entries (kind, group_id, record_id, level);
 CREATE INDEX idx_acl_entries_group_id ON acl_entries (group_id);
+
+-- PostgreSQL / SQLite
+DROP INDEX IF EXISTS idx_acl_entries_group;
+CREATE INDEX IF NOT EXISTS idx_acl_entries_group_record ON acl_entries (kind, group_id, record_id, level);
+CREATE INDEX IF NOT EXISTS idx_acl_entries_group_id ON acl_entries (group_id);
 ```
+
+Create the new index first and drop the old one afterwards when the table is in use.
 
 ---
 
@@ -157,8 +164,7 @@ AclStore (Orchestrator)
   └── Handler/Entry/FindEntries          all entries of a record
 
 AclFilter (Orchestrator)
-  ├── Handler/Filter/BuildRowCondition   single-value subquery bound to the outer key
-  └── Handler/Filter/BuildRecordIds      key set
+  └── Handler/Filter/BuildExistsQuery    subquery for exists(), bound to the outer key
 
 AclBackfill (Orchestrator)
   ├── Handler/Backfill/FindRecordsWithoutEntry  next batch of records without an entry

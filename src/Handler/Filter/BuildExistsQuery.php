@@ -10,12 +10,12 @@ use JardisSupport\DbQuery\Data\Expression;
 use JardisSupport\DbQuery\DbQuery;
 
 /**
- * Builds the single-value subquery that says whether the row of an outer query is visible: it yields 1
- * for a row of the kind whose key an entry of one of the groups holds at the minimum level or above, and
- * no value otherwise. The key column is bound to the outer row; a qualified name (alias.column) keeps it
- * apart from the entry columns.
+ * Builds the subquery for `exists()` that says whether the row of an outer query is visible: a row of the kind
+ * whose key an entry of one of the groups holds at the minimum level or above. The key column is bound to the
+ * outer row; a qualified name (alias.column) keeps it apart from the entry columns. No limit and no distinct:
+ * `EXISTS` stops at the first hit by itself.
  */
-final class BuildRowCondition
+final class BuildExistsQuery
 {
     public function __construct(
         private readonly string $table,
@@ -27,7 +27,7 @@ final class BuildRowCondition
      */
     public function __invoke(int $kind, array $groups, AccessLevel $min, string $keyColumn): DbQueryBuilderInterface
     {
-        $query = (new DbQuery())->select('1')->from($this->table)->limit(1);
+        $query = (new DbQuery())->select('1')->from($this->table);
         $query
             ->where('kind')->equals($kind)
             ->and('record_id')->equals(Expression::column($keyColumn))
