@@ -84,6 +84,8 @@ $query = (new DbQuery())->select('d.*')->from('documents', 'd')
     ->where('d.id')->in($filter->recordIds(7, [9, 12], AccessLevel::View));
 ```
 
+`AclFilter::COUNT_CAP` (`int`, `10000`) is the fixed limit of the capped total of a filtered list: count it as `where(key)->in($filter->recordIds(...))`, sorted like the page, `limit(AclFilter::COUNT_CAP + 1)`, counted from outside with `COUNT(*)`. The total is at most `COUNT_CAP`; when the count exceeds it, report `COUNT_CAP` and mark the total as capped.
+
 Both forms give the same set as `AclStore::levelOf`. An empty group list sees nothing. The filter may stand behind other conditions (e.g. a tenant column) — this needs `jardissupport/dbquery` 1.3.1 or newer.
 
 ### Backfill Existing Records (`AclBackfill`)
