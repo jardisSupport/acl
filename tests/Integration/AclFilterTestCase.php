@@ -13,14 +13,13 @@ use JardisSupport\Acl\Tests\Support\RecordTable;
 use JardisSupport\Contract\DbConnection\DbConnectionInterface;
 use JardisSupport\Contract\DbQuery\DbPreparedQueryInterface;
 use JardisSupport\Contract\DbQuery\DbQueryBuilderInterface;
-use JardisSupport\DbQuery\Data\Expression;
 use JardisSupport\DbQuery\DbQuery;
 use JardisSupport\Repository\Handler\QueryExecutor;
 use PHPUnit\Framework\TestCase;
 
 /**
  * AclFilter against a real database (one subclass per dialect): a business table of 20 documents, two
- * information kinds, three levels, two persons. The filter is run inside a real query, in both forms.
+ * information kinds, three levels, two persons. The filter is run inside a real query as an `exists()` subquery.
  */
 abstract class AclFilterTestCase extends TestCase
 {
@@ -97,110 +96,79 @@ abstract class AclFilterTestCase extends TestCase
     }
 
     /**
+     * The filter as the first and only condition of the query: `->exists($filter->existsQuery(...))`.
+     *
      * @param list<int> $groups
      * @return list<int>
      */
-    private function byRowCondition(int $kind, array $groups, AccessLevel $min): array
+    private function byExists(int $kind, array $groups, AccessLevel $min): array
     {
         return $this->visibleIds(fn (DbQuery $q) => $q
-            ->where(Expression::integer(1))->equals($this->filter->rowCondition($kind, $groups, $min, 'd.id')));
+            ->exists($this->filter->existsQuery($kind, $groups, $min, 'd.id')));
     }
 
-    /**
-     * @param list<int> $groups
-     * @return list<int>
-     */
-    private function byRecordIds(int $kind, array $groups, AccessLevel $min): array
+    // AK1 - the filter gives the expected set, each record once
+
+    public function testExistsReturnsTheExpectedRecordsEachOnce(): void
     {
-        return $this->visibleIds(fn (DbQuery $q) => $q
-            ->where('d.id')->in($this->filter->recordIds($kind, $groups, $min)));
+        self::assertSame(range(1, 9), $this->byExists(self::KIND_A, self::PERSON_A, AccessLevel::View));
+        self::assertSame(range(3, 9), $this->byExists(self::KIND_A, self::PERSON_A, AccessLevel::Edit));
+        self::assertSame(range(6, 9), $this->byExists(self::KIND_A, self::PERSON_A, AccessLevel::All));
+        self::assertSame(range(10, 17), $this->byExists(self::KIND_A, self::PERSON_B, AccessLevel::View));
+        self::assertSame(range(14, 17), $this->byExists(self::KIND_A, self::PERSON_B, AccessLevel::Edit));
+        self::assertSame([17], $this->byExists(self::KIND_A, self::PERSON_B, AccessLevel::All));
     }
 
-    // AK1 - rowCondition returns the expected set, each record once
+    // AK3 - each record once, also when several groups hold an entry for it
 
-    public function testRowConditionReturnsTheExpectedRecordsEachOnce(): void
-    {
-        self::assertSame(range(1, 9), $this->byRowCondition(self::KIND_A, self::PERSON_A, AccessLevel::View));
-        self::assertSame(range(3, 9), $this->byRowCondition(self::KIND_A, self::PERSON_A, AccessLevel::Edit));
-        self::assertSame(range(6, 9), $this->byRowCondition(self::KIND_A, self::PERSON_A, AccessLevel::All));
-        self::assertSame(range(10, 17), $this->byRowCondition(self::KIND_A, self::PERSON_B, AccessLevel::View));
-        self::assertSame(range(14, 17), $this->byRowCondition(self::KIND_A, self::PERSON_B, AccessLevel::Edit));
-        self::assertSame([17], $this->byRowCondition(self::KIND_A, self::PERSON_B, AccessLevel::All));
-    }
-
-    public function testRowConditionOverSeveralGroupsListsARecordOnceNotOncePerGroup(): void
+    public function testExistsOverSeveralGroupsListsARecordOnceNotOncePerGroup(): void
     {
         $groups = [...self::PERSON_A, ...self::PERSON_B, 30];
 
-        self::assertSame(range(1, self::DOCS), $this->byRowCondition(self::KIND_A, $groups, AccessLevel::View));
+        self::assertSame(range(1, self::DOCS), $this->byExists(self::KIND_A, $groups, AccessLevel::View));
     }
 
-    public function testRowConditionIsOneConditionAmongOthers(): void
+    public function testExistsIsOneConditionAmongOthers(): void
     {
         $ids = $this->visibleIds(fn (DbQuery $q) => $q
-            ->where(Expression::integer(1))->equals(
-                $this->filter->rowCondition(self::KIND_A, self::PERSON_A, AccessLevel::View, 'd.id'),
-            )
+            ->exists($this->filter->existsQuery(self::KIND_A, self::PERSON_A, AccessLevel::View, 'd.id'))
             ->and('d.id')->greater(4)
             ->and('d.id')->lower(8));
 
         self::assertSame([5, 6, 7], $ids);
     }
 
-    public function testRowConditionBehindAnotherConditionGivesTheExpectedSet(): void
+    public function testExistsBehindATenantConditionGivesTheExpectedSet(): void
     {
         // Since dbquery 1.3.1 a subquery value is inlined in every condition, not only in the first one.
-        $ids = $this->visibleIds(fn (DbQuery $q) => $q
-            ->where('d.tenant')->equals('north')
-            ->and(Expression::integer(1))->equals(
-                $this->filter->rowCondition(self::KIND_A, self::PERSON_A, AccessLevel::Edit, 'd.id'),
-            ));
-
-        self::assertSame(range(3, 9), $ids);
-        self::assertSame(
-            [14, 15, 16, 17],
-            $this->visibleIds(fn (DbQuery $q) => $q
-                ->where('d.tenant')->equals('south')
-                ->and(Expression::integer(1))->equals(
-                    $this->filter->rowCondition(self::KIND_A, self::PERSON_B, AccessLevel::Edit, 'd.id'),
-                )),
-        );
-    }
-
-    public function testRecordIdsBehindAnotherConditionGivesTheExpectedSet(): void
-    {
         $north = $this->visibleIds(fn (DbQuery $q) => $q
             ->where('d.tenant')->equals('north')
-            ->and('d.id')->in($this->filter->recordIds(self::KIND_A, self::PERSON_A, AccessLevel::Edit)));
+            ->exists($this->filter->existsQuery(self::KIND_A, self::PERSON_A, AccessLevel::Edit, 'd.id')));
         $south = $this->visibleIds(fn (DbQuery $q) => $q
             ->where('d.tenant')->equals('south')
-            ->and('d.id')->in($this->filter->recordIds(self::KIND_A, self::PERSON_B, AccessLevel::Edit)));
+            ->exists($this->filter->existsQuery(self::KIND_A, self::PERSON_B, AccessLevel::Edit, 'd.id')));
 
         self::assertSame(range(3, 9), $north);
         self::assertSame([14, 15, 16, 17], $south);
     }
 
-    public function testBothFormsBehindSeveralConditionsAndTogether(): void
+    public function testExistsBetweenSeveralConditions(): void
     {
         $ids = $this->visibleIds(fn (DbQuery $q) => $q
             ->where('d.tenant')->equals('north')
             ->and('d.id')->greater(2)
-            ->and(Expression::integer(1))->equals(
-                $this->filter->rowCondition(self::KIND_A, self::PERSON_A, AccessLevel::View, 'd.id'),
-            )
-            ->and('d.id')->in($this->filter->recordIds(self::KIND_A, self::PERSON_A, AccessLevel::Edit)));
+            ->exists($this->filter->existsQuery(self::KIND_A, self::PERSON_A, AccessLevel::Edit, 'd.id'))
+            ->and('d.id')->lower(9));
 
-        self::assertSame(range(3, 9), $ids);
+        self::assertSame(range(3, 8), $ids);
     }
 
-    public function testRowConditionBindsAnUnqualifiedKeyColumnToTheOuterRow(): void
+    public function testExistsBindsAnUnqualifiedKeyColumnToTheOuterRow(): void
     {
         $prepared = (new DbQuery())
             ->select('id')
             ->from('acl_docs')
-            ->where(Expression::integer(1))->equals(
-                $this->filter->rowCondition(self::KIND_A, self::PERSON_B, AccessLevel::Edit, 'id'),
-            )
+            ->exists($this->filter->existsQuery(self::KIND_A, self::PERSON_B, AccessLevel::Edit, 'id'))
             ->orderBy('id')
             ->sql($this->executor->getDialect(), prepared: true);
         \assert($prepared instanceof DbPreparedQueryInterface);
@@ -211,42 +179,19 @@ abstract class AclFilterTestCase extends TestCase
         );
     }
 
-    // AK2 - recordIds gives the same set as rowCondition, for each minimum level
-
-    public function testRecordIdsReturnsTheSameSetAsRowConditionForEachMinimumLevel(): void
+    public function testTheSubqueryHasNeitherLimitNorDistinct(): void
     {
-        foreach ([self::PERSON_A, self::PERSON_B, [...self::PERSON_A, ...self::PERSON_B]] as $groups) {
-            foreach ([AccessLevel::View, AccessLevel::Edit, AccessLevel::All] as $min) {
-                self::assertSame(
-                    $this->byRowCondition(self::KIND_A, $groups, $min),
-                    $this->byRecordIds(self::KIND_A, $groups, $min),
-                    sprintf('groups %s, minimum %s', implode(',', $groups), $min->name),
-                );
-            }
-        }
-        self::assertSame(range(3, 9), $this->byRecordIds(self::KIND_A, self::PERSON_A, AccessLevel::Edit));
-        self::assertSame([17], $this->byRecordIds(self::KIND_A, self::PERSON_B, AccessLevel::All));
-    }
-
-    public function testRecordIdsOverSeveralGroupsListsARecordOnce(): void
-    {
-        $sub = $this->filter->recordIds(self::KIND_A, [10, 11, 12], AccessLevel::View);
-        $prepared = $sub->sql($this->executor->getDialect(), prepared: true);
+        $prepared = $this->filter
+            ->existsQuery(self::KIND_A, self::PERSON_A, AccessLevel::View, 'd.id')
+            ->sql($this->executor->getDialect(), prepared: true);
         \assert($prepared instanceof DbPreparedQueryInterface);
-        $numbers = array_map(
-            static fn (array $row): int => (int) $row['record_id'],
-            $this->executor->fetchAll($prepared),
-        );
 
-        self::assertCount(9, $numbers);
-        self::assertSame(range(1, 9), (static function (array $n): array {
-            sort($n);
-
-            return $n;
-        })($numbers));
+        self::assertStringNotContainsStringIgnoringCase('LIMIT', $prepared->sql());
+        self::assertStringNotContainsStringIgnoringCase('DISTINCT', $prepared->sql());
+        self::assertStringStartsWith('SELECT 1 FROM', $prepared->sql());
     }
 
-    // AK3 - visible in the filter <=> levelOf >= minimum (E1-I3), over every record, person and minimum
+    // AK1 - visible in the filter <=> levelOf >= minimum (E1-I3), over every record, person and minimum
 
     public function testVisibleInTheFilterExactlyWhenLevelOfReachesTheMinimum(): void
     {
@@ -270,31 +215,28 @@ abstract class AclFilterTestCase extends TestCase
                     }
 
                     $case = sprintf('kind %d, person %s, minimum %s', $kind, $name, $min->name);
-                    self::assertSame($expected, $this->byRowCondition($kind, $groups, $min), $case . ' (row)');
-                    self::assertSame($expected, $this->byRecordIds($kind, $groups, $min), $case . ' (ids)');
+                    self::assertSame($expected, $this->byExists($kind, $groups, $min), $case);
                 }
             }
         }
     }
 
-    // AK4 - empty group list sees nothing; entries of another kind with the same number do not count
+    // AK2 - empty group list sees nothing; entries of another kind with the same number do not count
 
-    public function testAnEmptyGroupListSeesNothingInBothForms(): void
+    public function testAnEmptyGroupListSeesNothing(): void
     {
         foreach ([AccessLevel::View, AccessLevel::Edit, AccessLevel::All] as $min) {
-            self::assertSame([], $this->byRowCondition(self::KIND_A, [], $min));
-            self::assertSame([], $this->byRecordIds(self::KIND_A, [], $min));
+            self::assertSame([], $this->byExists(self::KIND_A, [], $min));
         }
     }
 
     public function testEntriesOfAnotherKindWithTheSameNumberDoNotCount(): void
     {
         // Group 10 holds "all" of 15-20 in kind B only; in kind A it reaches 1-9.
-        self::assertSame(range(15, 20), $this->byRowCondition(self::KIND_B, [10], AccessLevel::All));
-        self::assertSame(range(1, 9), $this->byRowCondition(self::KIND_A, [10, 11, 12], AccessLevel::View));
-        self::assertSame(range(1, 5), $this->byRowCondition(self::KIND_B, [20], AccessLevel::All));
-        self::assertSame([], $this->byRowCondition(3, self::PERSON_A, AccessLevel::View));
-        self::assertSame([], $this->byRecordIds(3, self::PERSON_A, AccessLevel::View));
+        self::assertSame(range(15, 20), $this->byExists(self::KIND_B, [10], AccessLevel::All));
+        self::assertSame(range(1, 9), $this->byExists(self::KIND_A, [10, 11, 12], AccessLevel::View));
+        self::assertSame(range(1, 5), $this->byExists(self::KIND_B, [20], AccessLevel::All));
+        self::assertSame([], $this->byExists(3, self::PERSON_A, AccessLevel::View));
     }
 
     // Ground rules of the filter itself
@@ -310,7 +252,7 @@ abstract class AclFilterTestCase extends TestCase
         $custom = new AclFilter('acl_custom');
 
         $ids = $this->visibleIds(fn (DbQuery $q) => $q
-            ->where(Expression::integer(1))->equals($custom->rowCondition(self::KIND_A, [77], AccessLevel::View, 'd.id')));
+            ->exists($custom->existsQuery(self::KIND_A, [77], AccessLevel::View, 'd.id')));
         $this->connection->pdo()->exec('DROP TABLE acl_custom');
 
         self::assertSame([2], $ids);
@@ -327,7 +269,7 @@ abstract class AclFilterTestCase extends TestCase
     {
         $this->expectException(InvalidArgumentException::class);
 
-        $this->filter->rowCondition(self::KIND_A, [1], AccessLevel::View, 'id) OR (1=1');
+        $this->filter->existsQuery(self::KIND_A, [1], AccessLevel::View, 'id) OR (1=1');
     }
 
     public function testBuildingTheFilterNeedsNoConnectionAndRunsNothing(): void
@@ -336,11 +278,7 @@ abstract class AclFilterTestCase extends TestCase
 
         self::assertInstanceOf(
             DbQueryBuilderInterface::class,
-            $filter->rowCondition(self::KIND_A, [1], AccessLevel::View, 'id'),
-        );
-        self::assertInstanceOf(
-            DbQueryBuilderInterface::class,
-            $filter->recordIds(self::KIND_A, [1], AccessLevel::View),
+            $filter->existsQuery(self::KIND_A, [1], AccessLevel::View, 'id'),
         );
     }
 }
