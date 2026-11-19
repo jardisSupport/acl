@@ -28,6 +28,13 @@
 composer require jardissupport/acl
 ```
 
+Until the package is listed on Packagist, add the GitHub source first:
+
+```bash
+composer config repositories.acl vcs https://github.com/jardisSupport/acl
+composer require jardissupport/acl:^1.0
+```
+
 Create the table once with the file of your dialect from `resources/sql/` (`mysql.sql`, `pgsql.sql`, `sqlite.sql`), or the equivalent in your own migration.
 
 ---
