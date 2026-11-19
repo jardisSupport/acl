@@ -6,6 +6,15 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-19
+
+### Changed
+
+- **Stable API.** The public API of 0.3.0 (`AclStore`, `AclFilter::existsQuery`, `AclFilter::COUNT_CAP`, `AclRule`,
+  `AclBackfill`, `Entry`, `AccessLevel`, the DDL in `resources/sql/`) is now covered by SemVer: breaking changes only in a
+  new major version. No code change against 0.3.0; verified by a consumer (generated code of the Jardis Builder).
+- README: installation from the GitHub source until the package is listed on Packagist.
+
 ## [0.3.0] - 2026-11-18
 
 ### Changed
