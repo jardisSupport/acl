@@ -104,15 +104,32 @@ $result = (new AclBackfill($connection))->run(
     creatorColumn: 'created_by',
     tenantColumn: 'tenant_id',
     groupOfCreator: fn (?string $tenant, array $creators): array => $groupLookup($tenant, $creators), // creator => group
-    fallbackGroup: 1,
+    fallbackGroup: 1, // a number, or fn (?string $tenant): ?int for a fallback group per tenant (null: none)
 );
 
-$result->written();    // entries written
-$result->toFallback(); // of those, given to the fallback group
-$result->skipped();    // records left without an entry (no creator group and no fallback group)
+$result->written();     // entries written
+$result->toFallback();  // of those, given to the fallback group
+$result->skipped();     // records left without an entry (no creator group and no fallback group)
+$result->withCreator(); // records met that carry a creator (not null, not '')
+$result->resolved();    // of those, the ones that got the group of their creator
 ```
 
-Every record without an entry gets one entry `all`. Records that have an entry are never touched, so a second run writes nothing.
+Every record without an entry gets one entry `all`. Records that have an entry are never touched, so a second run writes nothing. A fallback closure is asked at most once per tenant and batch, and only when a record of that tenant needs it; it returns `null` for a tenant without a fallback group, whose records are then skipped.
+
+**Verdict over a whole pass.** Several source tables, one `run` each; afterwards `judge` gets all results and refuses the pass when records with a creator were met and not one creator resolved to a group (the creator lookup found nothing). One resolved creator, or no record with a creator, lets the pass stand:
+
+```php
+use JardisSupport\Acl\Exception\BackfillUnresolved;
+
+// ONE transaction around the runs AND the verdict (jardissupport/repository RunInTransaction):
+$runInTransaction(function () use ($backfill, $lookup, $fallback): void {
+    $documents = $backfill->run(7, 'documents', 'id', 'created_by', 'tenant_id', $lookup, $fallback);
+    $notes = $backfill->run(8, 'notes', 'id', 'created_by', 'tenant_id', $lookup, $fallback);
+    $backfill->judge($documents, $notes); // throws BackfillUnresolved: the exception rolls every row back
+});
+```
+
+`run` never throws the verdict; the exception carries `$withCreator`. A later pass over records that stayed without a group (no fallback group, no creator resolved) sees only these and is refused again; it writes nothing.
 
 ---
 
@@ -175,7 +192,10 @@ AclFilter (Orchestrator)
 
 AclBackfill (Orchestrator)
   ├── Handler/Backfill/FindRecordsWithoutEntry  next batch of records without an entry
-  └── Handler/Backfill/BackfillEntries          creator group, else fallback group, else skip
+  ├── Handler/Backfill/BackfillEntries          creator group, else fallback group (number or per tenant), else skip
+  └── Handler/Backfill/JudgeBackfill            verdict over the results of all runs of a pass
+
+Exception/  BackfillUnresolved
 
 Handler/Table/AssertTableName, AssertColumnName   plain identifiers only
 Data/  AccessLevel, AccessDecision, Entry, BackfillResult, AclRule
@@ -185,7 +205,7 @@ Data/  AccessLevel, AccessDecision, Entry, BackfillResult, AclRule
 
 ## What This Package Does NOT Do
 
-- **No transaction** — `grantAll`, `reassignGroup` and `AclBackfill::run` run several statements; bracket them with `RunInTransaction`
+- **No transaction** — `grantAll`, `reassignGroup` and `AclBackfill::run` run several statements; bracket them with `RunInTransaction` (for a backfill: all runs and `judge` in ONE bracket)
 - **No group, user, tenant or person model** — the package knows integers; who holds which group is your domain
 - **No HTTP layer, no session, no events** — nothing is dispatched
 - **No rejection** — `check()` returns `AccessDecision`; the status code is yours. `AclRule` only names the rule "the last entry with level all stays" (`NAME`, `MESSAGE_KEY`) for your 422

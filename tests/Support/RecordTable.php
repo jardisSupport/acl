@@ -25,17 +25,19 @@ final class RecordTable
      * Table of existing records with creator and tenant, for the backfill.
      *
      * @param list<array{0: int, 1: ?string, 2: ?string}> $rows id, creator, tenant
+     * @param string $table acl_src, or acl_src2 for a second source table
      */
-    public static function sources(DbConnectionInterface $connection, array $rows): void
+    public static function sources(DbConnectionInterface $connection, array $rows, string $table = 'acl_src'): void
     {
+        self::assertSourceName($table);
         $pdo = $connection->pdo();
-        $pdo->exec('DROP TABLE IF EXISTS acl_src');
+        $pdo->exec('DROP TABLE IF EXISTS ' . $table);
         $pdo->exec(
-            'CREATE TABLE acl_src (id BIGINT NOT NULL PRIMARY KEY, created_by VARCHAR(40) NULL, '
+            'CREATE TABLE ' . $table . ' (id BIGINT NOT NULL PRIMARY KEY, created_by VARCHAR(40) NULL, '
             . 'tenant VARCHAR(40) NULL)'
         );
         $pdo->beginTransaction();
-        $insert = $pdo->prepare('INSERT INTO acl_src (id, created_by, tenant) VALUES (?, ?, ?)');
+        $insert = $pdo->prepare('INSERT INTO ' . $table . ' (id, created_by, tenant) VALUES (?, ?, ?)');
         foreach ($rows as $row) {
             $insert->execute($row);
         }
@@ -46,5 +48,13 @@ final class RecordTable
     {
         $connection->pdo()->exec('DROP TABLE IF EXISTS acl_docs');
         $connection->pdo()->exec('DROP TABLE IF EXISTS acl_src');
+        $connection->pdo()->exec('DROP TABLE IF EXISTS acl_src2');
+    }
+
+    private static function assertSourceName(string $table): void
+    {
+        if (!in_array($table, ['acl_src', 'acl_src2'], true)) {
+            throw new \InvalidArgumentException('Unknown source table ' . $table);
+        }
     }
 }

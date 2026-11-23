@@ -6,6 +6,23 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`AclBackfill::judge(BackfillResult ...$results): void`** — the verdict over all runs of one pass: records with a
+  creator were met and not one creator resolved to a group (sum over the results) -> `BackfillUnresolved`. No record
+  with a creator, or one resolved creator, lets the pass stand. Closure `Handler/Backfill/JudgeBackfill`; writes and
+  brackets nothing. `run` never throws it; the caller puts the runs and the verdict into ONE transaction
+  (`jardissupport/repository` `RunInTransaction`) so the exception rolls every row of the pass back.
+- **`Exception\BackfillUnresolved`** (`RuntimeException`) with the public `$withCreator` (records with a creator, summed).
+- **`BackfillResult::withCreator()` and `resolved()`** — records met that carry a creator (not `null`, not `''`), and of
+  those the ones that got the group of their creator. Two new constructor arguments at the end, default `0`.
+- **Fallback group per tenant:** `AclBackfill::run` takes `$fallbackGroup` as `int|Closure|null`; the closure
+  `(?string $tenant): ?int` names the group of a tenant (`null`: none, that tenant's records are skipped). It is asked
+  at most once per tenant and batch, and only when a record of that tenant needs it.
+
+All additive: `run` with a number or `null` as fallback group behaves as in 1.0.0. A second pass over records that stayed
+without a group (no fallback group) sees only them and is refused again; it writes nothing.
+
 ## [1.0.0] - 2026-11-19
 
 ### Changed

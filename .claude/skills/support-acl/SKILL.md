@@ -15,7 +15,7 @@ next: []
 ```
 AclStore      (DbConnectionInterface, table)  grant / revoke / lookup / check / reassign on the entry table
 AclFilter     (table; no connection)          builds dbquery objects that restrict a record query to visible records; runs nothing
-AclBackfill   (DbConnectionInterface, table)  gives records without an entry one entry "all" (creator group, else fallback group)
+AclBackfill   (DbConnectionInterface, table)  gives records without an entry one entry "all" (creator group, else fallback group); judge() refuses a pass in which no creator resolved
 ```
 Three Orchestrators in `src/` root; each method delegates to one Closure (invokable handler under `src/Handler/{Entry,Filter,Backfill,Table}/`) bound in the constructor via `->__invoke(...)`. No business logic in the Orchestrator. Execution goes through `jardissupport/repository` `QueryExecutor`, SQL is built with `jardissupport/dbquery` (prepared mode, upsert of `DbInsert`).
 
@@ -89,12 +89,16 @@ public function run(
     ?string $creatorColumn,
     ?string $tenantColumn,
     Closure $groupOfCreator,      // @param Closure(?string, list<string>): array<string, int>
-    ?int $fallbackGroup,
+    int|Closure|null $fallbackGroup,  // @param int|Closure(?string): ?int|null — closure: fallback group of a tenant, null = none
     int $batch = 1000,
 ): BackfillResult
+
+public function judge(BackfillResult ...$results): void   // @throws BackfillUnresolved
 ```
 - Writes one entry `all` for each record of `$sourceTable` that holds no entry of the kind; records with an entry are never touched, a second run writes nothing.
 - Group of a record: `$groupOfCreator($tenant, $creators)` returns the group per creator (called once per tenant and batch; tenant from `$tenantColumn`, `null` without one); no creator or creator unknown → `$fallbackGroup`; without a fallback group the record is skipped and stays without an entry.
+- `$fallbackGroup` closure `(?string $tenant): ?int` is asked at most once per tenant and batch and only when a record of that tenant needs it; `null` → records of that tenant skipped.
+- `judge(...$results)`: sums `withCreator()` and `resolved()` over the results of all `run` calls of a pass; sum `withCreator` > 0 and sum `resolved` = 0 → `BackfillUnresolved` (`RuntimeException`, public `int $withCreator`). `run` never throws it; `judge` writes nothing. Put all `run` calls and `judge` into ONE `RunInTransaction` bracket of the caller: the exception then rolls the whole pass back. Records left without a group (no fallback group) are seen alone by the next pass, which `judge` refuses again; nothing is written.
 - Names (`$sourceTable`, `$keyColumn`, `$creatorColumn`, `$tenantColumn`) are validated as plain identifiers before anything runs; `$batch < 1` → `InvalidArgumentException`. Works in key order, batch by batch; no transaction.
 
 ## DATA CLASSES (`src/Data/`)
@@ -109,10 +113,18 @@ final readonly class Entry
 public function __construct(public int $group, public AccessLevel $level)
 
 final readonly class BackfillResult
-public function __construct(private int $written, private int $toFallback, private int $skipped)
+public function __construct(
+    private int $written, private int $toFallback, private int $skipped,
+    private int $withCreator = 0, private int $resolved = 0,
+)
 public function written(): int      // entries written in total
 public function toFallback(): int   // of those, given to the fallback group
 public function skipped(): int      // records left without an entry (no creator group, no fallback)
+public function withCreator(): int  // records met with a creator (not null, not '')
+public function resolved(): int     // of those, given the group of their creator
+
+final class BackfillUnresolved extends \RuntimeException   // namespace JardisSupport\Acl\Exception
+public function __construct(public readonly int $withCreator)
 
 final class AclRule     // private constructor, constants only
 const NAME = 'LastFullEntryStays';  const MESSAGE_KEY = 'acl.lastFullEntry';
@@ -136,7 +148,7 @@ $rows = (new DbQuery())->select('d.*')->from('documents', 'd')
 ```
 
 ## RULES
-- **No transaction of its own.** `grantAll`, `reassignGroup` and `AclBackfill::run` run several statements; the caller brackets them (`jardissupport/repository` `RunInTransaction`) when they must succeed or fail as a whole.
+- **No transaction of its own.** `grantAll`, `reassignGroup` and `AclBackfill::run` run several statements; the caller brackets them (`jardissupport/repository` `RunInTransaction`) when they must succeed or fail as a whole; a backfill pass: all `run` calls and `judge` in ONE bracket.
 - **Numbers only.** `acl` knows `int` kind, record, group and the three levels; who a group is, who holds which group and how a record is created is the caller's.
 - **Information kind comes first** in every key and every condition; a kind never reaches another kind's entries.
 - **Rejection is the caller's.** `AccessDecision` and `isLastFullEntry` answer; the status (403/404/422) is chosen by the caller (`AclRule` supplies name and message key).

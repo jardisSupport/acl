@@ -99,7 +99,7 @@ final class StructureTest extends TestCase
                 ],
             ],
             'AclFilter' => [AclFilter::class, ['existsQuery']],
-            'AclBackfill' => [AclBackfill::class, ['run']],
+            'AclBackfill' => [AclBackfill::class, ['judge', 'run']],
         ];
     }
 
