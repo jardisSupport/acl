@@ -6,6 +6,53 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`AclStore::keepsFullEntryWith(int $kind, int $recordId, list<Entry> $entries): bool`** — the verdict over the state
+  AFTER setting the entries: true exactly when at least one group then holds level `all` on the record, in the list or
+  outside it (a group named twice counts with its last level, as `grantAll`). Reads, writes nothing. Closure
+  `Handler/Entry/KeepsFullEntryWith`.
+- **`AclStore::keepsFullEntryWithout(int $kind, int $recordId, list<int> $groups): bool`** — the verdict over the state
+  AFTER removing the groups: true exactly when a group outside the list holds level `all`; `[]` asks for the present
+  state. Closure `Handler/Entry/KeepsFullEntryWithout`. For a call naming several groups `isLastFullEntry` is not enough:
+  when two groups hold `all` and the call names both, neither is "the last", yet no `all` stays. The caller puts verdict
+  and write into ONE transaction.
+- **`AclStore::revokeAll(int $kind, int $recordId, list<int> $groups): void`** — removes the entries of several groups;
+  a group without an entry or named twice is harmless, `[]` writes nothing; one statement per 500 groups, no transaction.
+  Closure `Handler/Entry/RevokeEntries`.
+- **`AclStore::entriesOfWords(array<int, string> $words): WordEntries`** — turns pairs group -> level word into
+  `list<Entry>` and names the groups without a valid word (`''`, other casing, any other word are invalid); throws
+  nothing, needs no database. Closure `Handler/Entry/ResolveWords`.
+- **`Data\WordEntries`** (`final readonly`) with `list<Entry> $entries` and `list<int> $invalid`.
+- **`AclBackfill::judge(BackfillResult ...$results): void`** — the verdict over all runs of one pass: records with a
+  creator were met and not one creator resolved to a group (sum over the results) -> `BackfillUnresolved`. No record
+  with a creator, or one resolved creator, lets the pass stand. Closure `Handler/Backfill/JudgeBackfill`; writes and
+  brackets nothing. `run` never throws it; the caller puts the runs and the verdict into ONE transaction
+  (`jardissupport/repository` `RunInTransaction`) so the exception rolls every row of the pass back.
+- **`Exception\BackfillUnresolved`** (`RuntimeException`) with the public `$withCreator` (records with a creator, summed).
+- **`BackfillResult::withCreator()` and `resolved()`** — records met that carry a creator (not `null`, not `''`), and of
+  those the ones that got the group of their creator. Two new constructor arguments at the end, default `0`.
+- **Fallback group per tenant:** `AclBackfill::run` takes `$fallbackGroup` as `int|Closure|null`; the closure
+  `(?string $tenant): ?int` names the group of a tenant (`null`: none, that tenant's records are skipped). It is asked
+  at most once per tenant and batch, and only when a record of that tenant needs it.
+
+All additive: `run` with a number or `null` as fallback group behaves as in 1.0.0. A second pass over records that stayed
+without a group (no fallback group) sees only them and is refused again; it writes nothing.
+
+### Fixed
+
+- **`AclBackfill::run` works for every integer key column.** The first page read had a lower bound at `PHP_INT_MIN`,
+  which PostgreSQL refused on a `SMALLINT`/`INTEGER` key (`SQLSTATE[22003]` out of range) and which skipped a key of
+  exactly `PHP_INT_MIN` on a `BIGINT` column. The first page now has no lower bound; each following page continues
+  after the last key seen. Negative keys, the key `0` and the ends of the type's range are backfilled on SQLite,
+  MySQL, MariaDB and PostgreSQL.
+- **`AclBackfill::run` takes linear time instead of quadratic time.** Each page bounded only the records read; the
+  lookup of existing entries stayed unbounded, so PostgreSQL read every entry of the kind written so far on each page
+  and the time per page grew with the progress of the run. From the second page on, the lookup carries the same lower
+  bound (`record_id` after the last key seen) as the records: every page reads only its own key range, on both sides.
+  Result unchanged. PostgreSQL 16, 1,000,000 records, pages of 1,000: 60 s before, 9 s after; the read time per page
+  is flat (median 1 ms, before 52 ms, up to 143 ms).
+
 ## [1.0.0] - 2026-11-19
 
 ### Changed

@@ -88,18 +88,22 @@ final class StructureTest extends TestCase
                 [
                     'check',
                     'entriesOf',
+                    'entriesOfWords',
                     'grant',
                     'grantAll',
                     'hasEntriesOfGroup',
                     'isLastFullEntry',
+                    'keepsFullEntryWith',
+                    'keepsFullEntryWithout',
                     'levelOf',
                     'reassignGroup',
                     'removeRecord',
                     'revoke',
+                    'revokeAll',
                 ],
             ],
             'AclFilter' => [AclFilter::class, ['existsQuery']],
-            'AclBackfill' => [AclBackfill::class, ['run']],
+            'AclBackfill' => [AclBackfill::class, ['judge', 'run']],
         ];
     }
 
