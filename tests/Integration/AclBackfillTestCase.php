@@ -13,6 +13,7 @@ use JardisSupport\Acl\Data\BackfillResult;
 use JardisSupport\Acl\Data\Entry;
 use JardisSupport\Acl\Exception\BackfillUnresolved;
 use JardisSupport\Acl\Tests\Support\AclTable;
+use JardisSupport\Acl\Tests\Support\RecordingStatement;
 use JardisSupport\Acl\Tests\Support\RecordTable;
 use JardisSupport\Contract\DbConnection\DbConnectionInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -192,6 +193,43 @@ abstract class AclBackfillTestCase extends TestCase
             foreach ([2, 4, 6, 8, 10] as $id) {
                 self::assertSame([], $this->levels(self::KIND_A, $id), "batch $batch record $id");
             }
+        }
+    }
+
+    /**
+     * Every page reads only its own key range, on both sides: the lookup of existing entries carries the lower
+     * bound of the page too, so the time per page does not grow with the entries already written.
+     */
+    public function testEveryPageAfterTheFirstBoundsTheEntryLookupByTheSameLowerKey(): void
+    {
+        $rows = [];
+        for ($id = 101; $id <= 105; $id++) {
+            $rows[] = [$id, null, null];
+        }
+        RecordTable::sources($this->connection, $rows);
+        $pdo = $this->connection->pdo();
+
+        RecordingStatement::install($pdo);
+        $result = $this->runBackfill(self::FALLBACK, 2);
+        $pages = RecordingStatement::selectsFrom('acl_src');
+        RecordingStatement::uninstall($pdo);
+
+        self::assertSame(5, $result->written());
+        self::assertCount(3, $pages);
+        // page 1 has no lower bound: the kind is its only bound value
+        self::assertSame([self::KIND_A], $pages[0]['bindings']);
+        // page 2 and 3: the last key of the page before bounds the records AND the entry lookup
+        foreach ([1 => 102, 2 => 104] as $page => $afterKey) {
+            self::assertSame(
+                2,
+                count(array_keys($pages[$page]['bindings'], $afterKey, true)),
+                'page ' . ($page + 1) . ' binds the lower key ' . $afterKey . ' on both sides',
+            );
+            self::assertMatchesRegularExpression(
+                '/NOT EXISTS\s*\(.*record_id\W+\s*>\s*\?/is',
+                $pages[$page]['sql'],
+                'page ' . ($page + 1) . ': the entry lookup carries the lower bound',
+            );
         }
     }
 

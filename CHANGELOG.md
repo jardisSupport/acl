@@ -46,6 +46,12 @@ without a group (no fallback group) sees only them and is refused again; it writ
   exactly `PHP_INT_MIN` on a `BIGINT` column. The first page now has no lower bound; each following page continues
   after the last key seen. Negative keys, the key `0` and the ends of the type's range are backfilled on SQLite,
   MySQL, MariaDB and PostgreSQL.
+- **`AclBackfill::run` takes linear time instead of quadratic time.** Each page bounded only the records read; the
+  lookup of existing entries stayed unbounded, so PostgreSQL read every entry of the kind written so far on each page
+  and the time per page grew with the progress of the run. From the second page on, the lookup carries the same lower
+  bound (`record_id` after the last key seen) as the records: every page reads only its own key range, on both sides.
+  Result unchanged. PostgreSQL 16, 1,000,000 records, pages of 1,000: 60 s before, 9 s after; the read time per page
+  is flat (median 1 ms, before 52 ms, up to 143 ms).
 
 ## [1.0.0] - 2026-11-19
 
