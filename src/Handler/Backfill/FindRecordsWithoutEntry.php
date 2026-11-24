@@ -11,7 +11,8 @@ use JardisSupport\Repository\Handler\QueryExecutor;
 
 /**
  * Loads the next batch of records of a source table that hold no entry of the kind, in key order after the
- * last key seen. The names are validated by the caller.
+ * last key seen. The first batch has no lower bound ($afterKey null), so the key column may be any integer type and
+ * hold any key of its range. The names are validated by the caller.
  */
 final class FindRecordsWithoutEntry
 {
@@ -30,7 +31,7 @@ final class FindRecordsWithoutEntry
         string $keyColumn,
         ?string $creatorColumn,
         ?string $tenantColumn,
-        int $afterKey,
+        ?int $afterKey,
         int $batch,
     ): array {
         $fields = ['src.' . $keyColumn];
@@ -47,10 +48,14 @@ final class FindRecordsWithoutEntry
             ->where('kind')->equals($kind)
             ->and('record_id')->equals(Expression::column('src.' . $keyColumn));
 
-        $prepared = (new DbQuery())
+        $query = (new DbQuery())
             ->select(implode(', ', $fields))
-            ->from($sourceTable, 'src')
-            ->where('src.' . $keyColumn)->greater($afterKey)
+            ->from($sourceTable, 'src');
+        if ($afterKey !== null) {
+            $query->where('src.' . $keyColumn)->greater($afterKey);
+        }
+
+        $prepared = $query
             ->notExists($hasEntry)
             ->orderBy('src.' . $keyColumn)
             ->limit($batch)

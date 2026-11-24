@@ -26,14 +26,22 @@ final class RecordTable
      *
      * @param list<array{0: int, 1: ?string, 2: ?string}> $rows id, creator, tenant
      * @param string $table acl_src, or acl_src2 for a second source table
+     * @param string $keyType integer type of the key column: SMALLINT, INTEGER or BIGINT
      */
-    public static function sources(DbConnectionInterface $connection, array $rows, string $table = 'acl_src'): void
-    {
+    public static function sources(
+        DbConnectionInterface $connection,
+        array $rows,
+        string $table = 'acl_src',
+        string $keyType = 'BIGINT',
+    ): void {
         self::assertSourceName($table);
+        if (!in_array($keyType, ['SMALLINT', 'INTEGER', 'BIGINT'], true)) {
+            throw new \InvalidArgumentException('Unknown key type ' . $keyType);
+        }
         $pdo = $connection->pdo();
         $pdo->exec('DROP TABLE IF EXISTS ' . $table);
         $pdo->exec(
-            'CREATE TABLE ' . $table . ' (id BIGINT NOT NULL PRIMARY KEY, created_by VARCHAR(40) NULL, '
+            'CREATE TABLE ' . $table . ' (id ' . $keyType . ' NOT NULL PRIMARY KEY, created_by VARCHAR(40) NULL, '
             . 'tenant VARCHAR(40) NULL)'
         );
         $pdo->beginTransaction();

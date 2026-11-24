@@ -15,6 +15,7 @@ use JardisSupport\Acl\Exception\BackfillUnresolved;
 use JardisSupport\Acl\Tests\Support\AclTable;
 use JardisSupport\Acl\Tests\Support\RecordTable;
 use JardisSupport\Contract\DbConnection\DbConnectionInterface;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /** AclBackfill against a real database (one subclass per dialect). */
@@ -217,6 +218,66 @@ abstract class AclBackfillTestCase extends TestCase
         self::assertSame([self::FALLBACK => 3], $this->levels(self::KIND_A, 1));
         self::assertSame([self::FALLBACK => 3], $this->levels(self::KIND_A, 2503));
         self::assertSame([], $this->calls);
+    }
+
+    /**
+     * The first page has no lower bound: the key column may be any integer type, hold negative keys and 0, and
+     * reach the ends of its range.
+     *
+     * @return array<string, array{0: string, 1: int, 2: int}> key type, smallest and largest key of its range
+     */
+    public static function keyTypes(): array
+    {
+        return [
+            'SMALLINT' => ['SMALLINT', -32768, 32767],
+            'INTEGER' => ['INTEGER', -2147483648, 2147483647],
+            'BIGINT' => ['BIGINT', PHP_INT_MIN, PHP_INT_MAX],
+        ];
+    }
+
+    #[DataProvider('keyTypes')]
+    public function testKeysOfAnyIntegerTypeIncludingNegativeZeroAndTheRangeEndsAreAllBackfilled(
+        string $keyType,
+        int $min,
+        int $max,
+    ): void {
+        $keys = [$min, -7, -1, 0, 1, 2, 9, $max];
+        RecordTable::sources(
+            $this->connection,
+            array_map(static fn (int $key): array => [$key, null, null], $keys),
+            'acl_src',
+            $keyType,
+        );
+
+        foreach ([1, 3, 100] as $batch) {
+            AclTable::recreate($this->connection);
+            $result = $this->runBackfill(self::FALLBACK, $batch);
+
+            self::assertSame(count($keys), $result->written(), "$keyType batch $batch");
+            foreach ($keys as $key) {
+                self::assertSame(
+                    [self::FALLBACK => 3],
+                    $this->levels(self::KIND_A, $key),
+                    "$keyType batch $batch key $key",
+                );
+            }
+        }
+    }
+
+    #[DataProvider('keyTypes')]
+    public function testSecondRunOverKeysOfAnyIntegerTypeWritesNothing(string $keyType, int $min, int $max): void
+    {
+        RecordTable::sources(
+            $this->connection,
+            [[$min, null, null], [0, null, null], [$max, null, null]],
+            'acl_src',
+            $keyType,
+        );
+        $this->runBackfill(self::FALLBACK, 2);
+
+        $again = $this->runBackfill(self::FALLBACK, 2);
+
+        self::assertSame(0, $again->written(), $keyType);
     }
 
     public function testAnEntryOfAnotherKindDoesNotCountAsAnEntryOfThisKind(): void

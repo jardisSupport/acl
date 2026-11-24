@@ -23,6 +23,14 @@ versioning follows [SemVer](https://semver.org/).
 All additive: `run` with a number or `null` as fallback group behaves as in 1.0.0. A second pass over records that stayed
 without a group (no fallback group) sees only them and is refused again; it writes nothing.
 
+### Fixed
+
+- **`AclBackfill::run` works for every integer key column.** The first page read had a lower bound at `PHP_INT_MIN`,
+  which PostgreSQL refused on a `SMALLINT`/`INTEGER` key (`SQLSTATE[22003]` out of range) and which skipped a key of
+  exactly `PHP_INT_MIN` on a `BIGINT` column. The first page now has no lower bound; each following page continues
+  after the last key seen. Negative keys, the key `0` and the ends of the type's range are backfilled on SQLite,
+  MySQL, MariaDB and PostgreSQL.
+
 ## [1.0.0] - 2026-11-19
 
 ### Changed

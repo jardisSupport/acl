@@ -50,7 +50,7 @@ final class BackfillEntries
         $skipped = 0;
         $withCreator = 0;
         $resolved = 0;
-        $afterKey = PHP_INT_MIN;
+        $afterKey = null;
 
         do {
             $records = ($this->findRecords)(
