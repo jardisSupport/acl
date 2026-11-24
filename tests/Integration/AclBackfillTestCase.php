@@ -818,4 +818,155 @@ abstract class AclBackfillTestCase extends TestCase
         self::assertSame(2, $result->toFallback());
         self::assertSame([77 => 3], $this->levels(self::KIND_A, 2));
     }
+
+    // E5-P3c-D-1 - progress closure after each written page
+
+    /** 2500 records without creator and tenant. */
+    private function twentyFiveHundred(): void
+    {
+        $rows = [];
+        for ($id = 1; $id <= 2500; $id++) {
+            $rows[] = [$id, null, null];
+        }
+        RecordTable::sources($this->connection, $rows);
+    }
+
+    public function testProgressIsCalledAfterEachWrittenPageWithGrowingTotalsEndingAtTheResult(): void
+    {
+        $this->twentyFiveHundred();
+        $calls = [];
+        $progress = function (BackfillResult $totals) use (&$calls): void {
+            $calls[] = ['written' => $totals->written(), 'rows' => $this->entryRows()];
+        };
+
+        $result = $this->backfill->run(
+            self::KIND_A,
+            'acl_src',
+            'id',
+            null,
+            null,
+            $this->groupOfCreator(),
+            self::FALLBACK,
+            1000,
+            $progress,
+        );
+
+        // the page is written before the call: the rows in the table equal the running total
+        self::assertSame(
+            [
+                ['written' => 1000, 'rows' => 1000],
+                ['written' => 2000, 'rows' => 2000],
+                ['written' => 2500, 'rows' => 2500],
+            ],
+            $calls,
+        );
+        self::assertSame(2500, $result->written());
+        self::assertSame(2500, $result->toFallback());
+    }
+
+    public function testProgressTotalsCarryAllCountersAndTheLastEqualsTheResult(): void
+    {
+        $this->sixRecords();
+        $seen = [];
+
+        $result = $this->backfill->run(
+            self::KIND_A,
+            'acl_src',
+            'id',
+            'created_by',
+            'tenant',
+            $this->groupOfCreator(),
+            self::FALLBACK,
+            2,
+            function (BackfillResult $totals) use (&$seen): void {
+                $seen[] = $totals;
+            },
+        );
+
+        self::assertNotEmpty($seen);
+        $last = $seen[array_key_last($seen)];
+        self::assertEquals($result, $last);
+        $previous = 0;
+        foreach ($seen as $totals) {
+            self::assertGreaterThan($previous, $totals->written() + $totals->skipped());
+            $previous = $totals->written() + $totals->skipped();
+        }
+    }
+
+    public function testResultWithAndWithoutProgressIsTheSame(): void
+    {
+        $this->twentyFiveHundred();
+        $with = $this->backfill->run(
+            self::KIND_A,
+            'acl_src',
+            'id',
+            null,
+            null,
+            $this->groupOfCreator(),
+            self::FALLBACK,
+            1000,
+            static function (BackfillResult $totals): void {
+            },
+        );
+        $rowsWith = $this->entryRows();
+        AclTable::recreate($this->connection);
+
+        $without = $this->backfill->run(
+            self::KIND_A,
+            'acl_src',
+            'id',
+            null,
+            null,
+            $this->groupOfCreator(),
+            self::FALLBACK,
+            1000,
+        );
+
+        self::assertEquals($without, $with);
+        self::assertSame($rowsWith, $this->entryRows());
+    }
+
+    public function testEmptySourceNeverCallsProgress(): void
+    {
+        RecordTable::sources($this->connection, []);
+        $calls = 0;
+
+        $this->backfill->run(
+            self::KIND_A,
+            'acl_src',
+            'id',
+            'created_by',
+            'tenant',
+            $this->groupOfCreator(),
+            self::FALLBACK,
+            1000,
+            function () use (&$calls): void {
+                $calls++;
+            },
+        );
+
+        self::assertSame(0, $calls);
+    }
+
+    public function testAnExceptionFromProgressFliesThroughAndIsNotSwallowed(): void
+    {
+        $this->twentyFiveHundred();
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('stop');
+
+        $this->backfill->run(
+            self::KIND_A,
+            'acl_src',
+            'id',
+            null,
+            null,
+            $this->groupOfCreator(),
+            self::FALLBACK,
+            1000,
+            static function (BackfillResult $totals): void {
+                throw new \LogicException('stop');
+            },
+        );
+    }
 }
