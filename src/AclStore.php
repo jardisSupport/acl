@@ -8,16 +8,22 @@ use Closure;
 use JardisSupport\Acl\Data\AccessDecision;
 use JardisSupport\Acl\Data\AccessLevel;
 use JardisSupport\Acl\Data\Entry;
+use JardisSupport\Acl\Data\WordEntries;
 use JardisSupport\Acl\Handler\Entry\DecideAccess;
 use JardisSupport\Acl\Handler\Entry\FindEntries;
+use JardisSupport\Acl\Handler\Entry\FindFullEntryGroups;
 use JardisSupport\Acl\Handler\Entry\FindHighestLevel;
 use JardisSupport\Acl\Handler\Entry\GrantEntries;
 use JardisSupport\Acl\Handler\Entry\GrantEntry;
 use JardisSupport\Acl\Handler\Entry\HasEntriesOfGroup;
 use JardisSupport\Acl\Handler\Entry\IsLastFullEntry;
+use JardisSupport\Acl\Handler\Entry\KeepsFullEntryWith;
+use JardisSupport\Acl\Handler\Entry\KeepsFullEntryWithout;
 use JardisSupport\Acl\Handler\Entry\MoveEntries;
 use JardisSupport\Acl\Handler\Entry\ReassignGroup;
 use JardisSupport\Acl\Handler\Entry\RemoveRecord;
+use JardisSupport\Acl\Handler\Entry\ResolveWords;
+use JardisSupport\Acl\Handler\Entry\RevokeEntries;
 use JardisSupport\Acl\Handler\Entry\RevokeEntry;
 use JardisSupport\Acl\Handler\Entry\UpsertEntries;
 use JardisSupport\Acl\Handler\Table\AssertTableName;
@@ -43,6 +49,10 @@ final class AclStore
     private readonly Closure $reassignGroup;
     private readonly Closure $hasEntriesOfGroup;
     private readonly Closure $findEntries;
+    private readonly Closure $keepsFullEntryWith;
+    private readonly Closure $keepsFullEntryWithout;
+    private readonly Closure $revokeEntries;
+    private readonly Closure $resolveWords;
 
     public function __construct(DbConnectionInterface $connection, string $table = 'acl_entries')
     {
@@ -61,6 +71,11 @@ final class AclStore
         $this->reassignGroup = (new ReassignGroup($executor, $moveEntries, $table))->__invoke(...);
         $this->hasEntriesOfGroup = (new HasEntriesOfGroup($executor, $table))->__invoke(...);
         $this->findEntries = (new FindEntries($executor, $table))->__invoke(...);
+        $findFullEntryGroups = (new FindFullEntryGroups($executor, $table))->__invoke(...);
+        $this->keepsFullEntryWith = (new KeepsFullEntryWith($findFullEntryGroups))->__invoke(...);
+        $this->keepsFullEntryWithout = (new KeepsFullEntryWithout($findFullEntryGroups))->__invoke(...);
+        $this->revokeEntries = (new RevokeEntries($executor, $table))->__invoke(...);
+        $this->resolveWords = (new ResolveWords())->__invoke(...);
     }
 
     /**
@@ -150,5 +165,56 @@ final class AclStore
     public function entriesOf(int $kind, int $recordId): array
     {
         return ($this->findEntries)($kind, $recordId);
+    }
+
+    /**
+     * Verdict over the state AFTER setting the entries: true exactly when at least one group then holds level "all"
+     * on the record, whether it is in the list or outside it. A group named twice counts with its last level (as
+     * grantAll). Reads, writes nothing: ask first, then write, both inside the caller's transaction (jardissupport/
+     * repository RunInTransaction).
+     *
+     * @param list<Entry> $entries
+     */
+    public function keepsFullEntryWith(int $kind, int $recordId, array $entries): bool
+    {
+        return ($this->keepsFullEntryWith)($kind, $recordId, $entries);
+    }
+
+    /**
+     * Verdict over the state AFTER removing the groups: true exactly when a group outside the list holds level "all"
+     * on the record. An empty list asks for the present state. Reads, writes nothing; the caller sets the transaction
+     * as for keepsFullEntryWith().
+     *
+     * @param list<int> $groups
+     */
+    public function keepsFullEntryWithout(int $kind, int $recordId, array $groups): bool
+    {
+        return ($this->keepsFullEntryWithout)($kind, $recordId, $groups);
+    }
+
+    /**
+     * Removes the entries of several groups on the record: an empty list writes nothing, a group without an entry or
+     * named twice is harmless (as revoke()).
+     *
+     * Runs one statement per 500 groups and opens no transaction: the caller sets it (jardissupport/repository
+     * RunInTransaction), otherwise an interrupted call leaves the entries partly removed.
+     *
+     * @param list<int> $groups
+     */
+    public function revokeAll(int $kind, int $recordId, array $groups): void
+    {
+        ($this->revokeEntries)($kind, $recordId, $groups);
+    }
+
+    /**
+     * Turns pairs group -> level word into entries: the entries of the pairs with a valid word (`view`, `edit`,
+     * `all`) in the order of the pairs, and the groups whose word is none of them (including '' and any other
+     * spelling). Throws nothing, needs no database; the caller answers the invalid groups.
+     *
+     * @param array<int, string> $words level word by group
+     */
+    public function entriesOfWords(array $words): WordEntries
+    {
+        return ($this->resolveWords)($words);
     }
 }

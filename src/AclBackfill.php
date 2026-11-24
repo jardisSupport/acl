@@ -6,8 +6,10 @@ namespace JardisSupport\Acl;
 
 use Closure;
 use JardisSupport\Acl\Data\BackfillResult;
+use JardisSupport\Acl\Exception\BackfillUnresolved;
 use JardisSupport\Acl\Handler\Backfill\BackfillEntries;
 use JardisSupport\Acl\Handler\Backfill\FindRecordsWithoutEntry;
+use JardisSupport\Acl\Handler\Backfill\JudgeBackfill;
 use JardisSupport\Acl\Handler\Entry\UpsertEntries;
 use JardisSupport\Acl\Handler\Table\AssertColumnName;
 use JardisSupport\Acl\Handler\Table\AssertTableName;
@@ -24,6 +26,7 @@ use JardisSupport\Repository\Handler\QueryExecutor;
 final class AclBackfill
 {
     private readonly Closure $backfillEntries;
+    private readonly Closure $judgeBackfill;
 
     public function __construct(DbConnectionInterface $connection, string $table = 'acl_entries')
     {
@@ -36,6 +39,7 @@ final class AclBackfill
 
         $this->backfillEntries = (new BackfillEntries($assertTable, $assertColumn, $findRecords, $upsertEntries))
             ->__invoke(...);
+        $this->judgeBackfill = (new JudgeBackfill())->__invoke(...);
     }
 
     /**
@@ -47,7 +51,12 @@ final class AclBackfill
      * fallback group it is skipped and stays without an entry. Records with an entry are never touched, so a
      * second run writes nothing. $batch bounds the records read and written at once.
      *
+     * $fallbackGroup is a number, or a closure that names the fallback group of a tenant (null: none, the records
+     * of that tenant are skipped). The closure is asked at most once per tenant and batch, and only when a record
+     * of that tenant needs it. The run never throws a verdict; {@see judge()} gives it.
+     *
      * @param Closure(?string, list<string>): array<string, int> $groupOfCreator
+     * @param int|Closure(?string): ?int|null $fallbackGroup
      */
     public function run(
         int $kind,
@@ -56,7 +65,7 @@ final class AclBackfill
         ?string $creatorColumn,
         ?string $tenantColumn,
         Closure $groupOfCreator,
-        ?int $fallbackGroup,
+        int|Closure|null $fallbackGroup,
         int $batch = 1000,
     ): BackfillResult {
         return ($this->backfillEntries)(
@@ -69,5 +78,23 @@ final class AclBackfill
             $fallbackGroup,
             $batch,
         );
+    }
+
+    /**
+     * Judges the runs of one pass together: when records with a creator were met and not one of them resolved to a
+     * group, the creator lookup found nothing and the pass is refused. One resolved creator, or no record with a
+     * creator, lets it stand. Pass the results of every run of the pass (several source tables): the verdict
+     * counts their sum, not each run.
+     *
+     * Writes nothing and brackets nothing. Run the runs and this verdict inside ONE transaction of the caller
+     * (jardissupport/repository RunInTransaction): the exception then rolls every row of the pass back. A later
+     * pass that sees only records left over (no fallback group, no creator resolved) is refused again and writes
+     * nothing.
+     *
+     * @throws BackfillUnresolved with the number of records with a creator
+     */
+    public function judge(BackfillResult ...$results): void
+    {
+        ($this->judgeBackfill)(...$results);
     }
 }

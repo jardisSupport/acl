@@ -185,6 +185,188 @@ abstract class AclStoreTestCase extends TestCase
         self::assertTrue($this->store->isLastFullEntry(self::KIND_A, 10, 1));
     }
 
+    // E5-P2-0 - verdict over a set of entries, revokeAll, words
+
+    public function testVerdictAfterRevokingBothHoldersOfAllJudgesOverTheSetNotPerGroup(): void
+    {
+        $this->store->grant(self::KIND_A, 10, 1, AccessLevel::All);
+        $this->store->grant(self::KIND_A, 10, 2, AccessLevel::All);
+
+        // each group alone is not "the last" - yet naming both leaves no "all" (the per-group question misses it)
+        self::assertFalse($this->store->isLastFullEntry(self::KIND_A, 10, 1));
+        self::assertFalse($this->store->isLastFullEntry(self::KIND_A, 10, 2));
+        self::assertFalse($this->store->keepsFullEntryWithout(self::KIND_A, 10, [1, 2]));
+        self::assertTrue($this->store->keepsFullEntryWithout(self::KIND_A, 10, [1]));
+        self::assertTrue($this->store->keepsFullEntryWithout(self::KIND_A, 10, [2]));
+        self::assertTrue($this->store->keepsFullEntryWithout(self::KIND_A, 10, []));
+    }
+
+    public function testVerdictAfterSettingBothHoldersOfAllToViewJudgesOverTheSet(): void
+    {
+        $this->store->grant(self::KIND_A, 10, 1, AccessLevel::All);
+        $this->store->grant(self::KIND_A, 10, 2, AccessLevel::All);
+
+        self::assertFalse($this->store->keepsFullEntryWith(
+            self::KIND_A,
+            10,
+            [new Entry(1, AccessLevel::View), new Entry(2, AccessLevel::View)],
+        ));
+        self::assertTrue($this->store->keepsFullEntryWith(self::KIND_A, 10, [new Entry(1, AccessLevel::View)]));
+        self::assertTrue($this->store->keepsFullEntryWith(
+            self::KIND_A,
+            10,
+            [new Entry(1, AccessLevel::View), new Entry(3, AccessLevel::All)],
+        ));
+    }
+
+    public function testVerdictWithASingleHolderOfAll(): void
+    {
+        $this->store->grant(self::KIND_A, 10, 1, AccessLevel::All);
+        $this->store->grant(self::KIND_A, 10, 2, AccessLevel::View);
+
+        self::assertTrue($this->store->keepsFullEntryWith(self::KIND_A, 10, [new Entry(1, AccessLevel::All)]));
+        self::assertTrue($this->store->keepsFullEntryWith(self::KIND_A, 10, [new Entry(2, AccessLevel::View)]));
+        self::assertFalse($this->store->keepsFullEntryWith(self::KIND_A, 10, [new Entry(1, AccessLevel::Edit)]));
+        self::assertTrue($this->store->keepsFullEntryWith(self::KIND_A, 10, []));
+
+        self::assertTrue($this->store->keepsFullEntryWithout(self::KIND_A, 10, [2]));
+        self::assertFalse($this->store->keepsFullEntryWithout(self::KIND_A, 10, [1]));
+    }
+
+    public function testVerdictOnARecordWithoutAFullEntry(): void
+    {
+        $this->store->grant(self::KIND_A, 10, 1, AccessLevel::Edit);
+        $this->store->grant(self::KIND_A, 10, 2, AccessLevel::View);
+
+        self::assertFalse($this->store->keepsFullEntryWithout(self::KIND_A, 10, []));
+        self::assertFalse($this->store->keepsFullEntryWithout(self::KIND_A, 10, [1]));
+        self::assertFalse($this->store->keepsFullEntryWith(self::KIND_A, 10, [new Entry(2, AccessLevel::Edit)]));
+        self::assertFalse($this->store->keepsFullEntryWith(self::KIND_A, 10, []));
+        self::assertTrue($this->store->keepsFullEntryWith(self::KIND_A, 10, [new Entry(9, AccessLevel::All)]));
+        self::assertTrue($this->store->keepsFullEntryWith(self::KIND_A, 10, [new Entry(1, AccessLevel::All)]));
+    }
+
+    public function testVerdictOnARecordWithoutAnyEntry(): void
+    {
+        self::assertFalse($this->store->keepsFullEntryWithout(self::KIND_A, 77, [1]));
+        self::assertFalse($this->store->keepsFullEntryWith(self::KIND_A, 77, [new Entry(1, AccessLevel::View)]));
+        self::assertTrue($this->store->keepsFullEntryWith(self::KIND_A, 77, [new Entry(1, AccessLevel::All)]));
+    }
+
+    public function testVerdictOfAGroupNamedTwiceCountsTheLastLevel(): void
+    {
+        $this->store->grant(self::KIND_A, 10, 1, AccessLevel::All);
+
+        self::assertFalse($this->store->keepsFullEntryWith(
+            self::KIND_A,
+            10,
+            [new Entry(1, AccessLevel::All), new Entry(1, AccessLevel::View)],
+        ));
+        self::assertTrue($this->store->keepsFullEntryWith(
+            self::KIND_A,
+            10,
+            [new Entry(1, AccessLevel::View), new Entry(1, AccessLevel::All)],
+        ));
+    }
+
+    public function testVerdictJudgesTheStateAfterTheCallAndWritesNothing(): void
+    {
+        $this->store->grant(self::KIND_A, 10, 1, AccessLevel::All);
+        $this->store->grant(self::KIND_A, 10, 2, AccessLevel::Edit);
+
+        $this->store->keepsFullEntryWith(self::KIND_A, 10, [new Entry(1, AccessLevel::View)]);
+        $this->store->keepsFullEntryWithout(self::KIND_A, 10, [1]);
+
+        self::assertSame([1 => 3, 2 => 2], $this->levels(self::KIND_A, 10));
+    }
+
+    public function testVerdictIgnoresOtherKindsAndOtherRecords(): void
+    {
+        $this->store->grant(self::KIND_A, 10, 1, AccessLevel::All);
+        $this->store->grant(self::KIND_A, 11, 2, AccessLevel::All);
+        $this->store->grant(self::KIND_B, 10, 3, AccessLevel::All);
+
+        self::assertFalse($this->store->keepsFullEntryWithout(self::KIND_A, 10, [1]));
+        self::assertFalse($this->store->keepsFullEntryWith(self::KIND_A, 10, [new Entry(1, AccessLevel::View)]));
+        self::assertTrue($this->store->keepsFullEntryWithout(self::KIND_A, 10, [2, 3]));
+    }
+
+    public function testRevokeAllRemovesExactlyTheNamedGroupsOfTheRecord(): void
+    {
+        $this->store->grant(self::KIND_A, 10, 1, AccessLevel::All);
+        $this->store->grant(self::KIND_A, 10, 2, AccessLevel::Edit);
+        $this->store->grant(self::KIND_A, 10, 3, AccessLevel::View);
+        $this->store->grant(self::KIND_A, 11, 1, AccessLevel::View);
+        $this->store->grant(self::KIND_B, 10, 1, AccessLevel::View);
+
+        $this->store->revokeAll(self::KIND_A, 10, [1, 2, 99]);
+
+        self::assertSame([3 => 1], $this->levels(self::KIND_A, 10));
+        self::assertSame([1 => 1], $this->levels(self::KIND_A, 11));
+        self::assertSame([1 => 1], $this->levels(self::KIND_B, 10));
+    }
+
+    public function testRevokeAllWithAnEmptyListWritesNothing(): void
+    {
+        $this->store->grant(self::KIND_A, 10, 1, AccessLevel::All);
+        $this->store->grant(self::KIND_A, 10, 2, AccessLevel::View);
+
+        $this->store->revokeAll(self::KIND_A, 10, []);
+
+        self::assertSame([1 => 3, 2 => 1], $this->levels(self::KIND_A, 10));
+    }
+
+    public function testRevokeAllOfAGroupNamedTwiceAndRollbackOfTheCallersTransaction(): void
+    {
+        $this->store->grant(self::KIND_A, 10, 1, AccessLevel::All);
+        $this->store->grant(self::KIND_A, 10, 2, AccessLevel::View);
+        $pdo = $this->connection->pdo();
+
+        $pdo->beginTransaction();
+        $this->store->revokeAll(self::KIND_A, 10, [1, 1, 2]);
+        self::assertSame([], $this->levels(self::KIND_A, 10));
+        $pdo->rollBack();
+
+        self::assertSame([1 => 3, 2 => 1], $this->levels(self::KIND_A, 10));
+    }
+
+    public function testRevokeAllHandlesMoreGroupsThanOneBatch(): void
+    {
+        $total = 1203;
+        for ($group = 1; $group <= $total; $group++) {
+            $this->store->grant(self::KIND_A, 10, $group, AccessLevel::View);
+        }
+        $this->store->grant(self::KIND_A, 10, $total + 1, AccessLevel::All);
+
+        $this->store->revokeAll(self::KIND_A, 10, range(1, $total));
+
+        self::assertSame([$total + 1 => 3], $this->levels(self::KIND_A, 10));
+    }
+
+    public function testWordsBecomeEntriesAndTheGroupsWithoutAValidWordAreNamed(): void
+    {
+        $result = $this->store->entriesOfWords([10 => 'view', 11 => 'all', 12 => '', 13 => 'ALL']);
+
+        self::assertEquals([new Entry(10, AccessLevel::View), new Entry(11, AccessLevel::All)], $result->entries);
+        self::assertSame([12, 13], $result->invalid);
+    }
+
+    public function testWordsOfNoPairsGiveNothing(): void
+    {
+        $result = $this->store->entriesOfWords([]);
+
+        self::assertSame([], $result->entries);
+        self::assertSame([], $result->invalid);
+    }
+
+    public function testWordsAreNotTrimmedAndEveryUnknownWordIsInvalid(): void
+    {
+        $result = $this->store->entriesOfWords([1 => ' view', 2 => 'edit', 3 => 'write', 4 => 'view ']);
+
+        self::assertEquals([new Entry(2, AccessLevel::Edit)], $result->entries);
+        self::assertSame([1, 3, 4], $result->invalid);
+    }
+
     // AK5 - removeRecord, reassignGroup, entriesOf
 
     public function testRemoveRecordRemovesAllRowsOfTheRecordAndNoOthers(): void
