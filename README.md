@@ -70,7 +70,24 @@ $store->hasEntriesOfGroup(9);                // false when the group may be dele
 $store->reassignGroup(9, 10);                // moves all entries of group 9 to 10, the higher level stays
 ```
 
-`grantAll()` and `reassignGroup()` run several statements and open no transaction. Bracket them with `jardissupport/repository` `RunInTransaction` when they must succeed or fail together.
+`grantAll()`, `revokeAll()` and `reassignGroup()` run several statements and open no transaction. Bracket them with `jardissupport/repository` `RunInTransaction` when they must succeed or fail together.
+
+### Several Targets at Once
+
+`isLastFullEntry()` asks about one group. When a call names several groups (share with a list, take back a list), ask about the state AFTER the call instead:
+
+```php
+// pairs group -> level word, as they arrive in a request
+$words = $store->entriesOfWords([10 => 'view', 11 => 'all', 12 => '', 13 => 'ALL']);
+$words->entries;   // [Entry(10, View), Entry(11, All)]
+$words->invalid;   // [12, 13] - the groups whose word is none of view, edit, all (nothing is thrown, no database needed)
+
+$store->keepsFullEntryWith(7, 1001, $words->entries);   // false: after setting these, no group holds "all" any more
+$store->keepsFullEntryWithout(7, 1001, [10, 11]);       // false: after removing groups 10 and 11, no group holds "all"
+$store->revokeAll(7, 1001, [10, 11]);                   // removes the entries of both groups; unknown groups and [] are harmless
+```
+
+`keepsFullEntryWith()` is true exactly when at least one group holds `all` after the entries are set (in the list or outside it; a group named twice counts with its last level). `keepsFullEntryWithout()` is true exactly when a group outside the list holds `all` (`[]` asks for the present state). Both only read. Put the verdict and the write into ONE `RunInTransaction` bracket, so no other call changes the record in between; rejecting (422) stays with you (`AclRule`).
 
 ### Restrict a Query to Visible Records (`AclFilter`)
 
@@ -180,6 +197,11 @@ AclStore (Orchestrator)
   ├── Handler/Entry/GrantEntries         one upsert per distinct group
   ├── Handler/Entry/RevokeEntry          delete one entry
   ├── Handler/Entry/IsLastFullEntry      the group is the only one holding "all"
+  ├── Handler/Entry/FindFullEntryGroups  the groups holding "all" on a record
+  ├── Handler/Entry/KeepsFullEntryWith   after setting these entries, does a group hold "all"?
+  ├── Handler/Entry/KeepsFullEntryWithout after removing these groups, does a group outside hold "all"?
+  ├── Handler/Entry/RevokeEntries        delete the entries of several groups
+  ├── Handler/Entry/ResolveWords         pairs group -> word into entries and invalid groups (no connection)
   ├── Handler/Entry/RemoveRecord         delete every entry of a record
   ├── Handler/Entry/ReassignGroup        move all entries of a group, in batches
   ├── Handler/Entry/MoveEntries          one batch; the higher level stays
@@ -198,21 +220,21 @@ AclBackfill (Orchestrator)
 Exception/  BackfillUnresolved
 
 Handler/Table/AssertTableName, AssertColumnName   plain identifiers only
-Data/  AccessLevel, AccessDecision, Entry, BackfillResult, AclRule
+Data/  AccessLevel, AccessDecision, Entry, WordEntries, BackfillResult, AclRule
 ```
 
 ---
 
 ## What This Package Does NOT Do
 
-- **No transaction** — `grantAll`, `reassignGroup` and `AclBackfill::run` run several statements; bracket them with `RunInTransaction` (for a backfill: all runs and `judge` in ONE bracket)
+- **No transaction** — `grantAll`, `revokeAll`, `reassignGroup` and `AclBackfill::run` run several statements; bracket them with `RunInTransaction` (for a backfill: all runs and `judge` in ONE bracket)
 - **No group, user, tenant or person model** — the package knows integers; who holds which group is your domain
 - **No HTTP layer, no session, no events** — nothing is dispatched
 - **No rejection** — `check()` returns `AccessDecision`; the status code is yours. `AclRule` only names the rule "the last entry with level all stays" (`NAME`, `MESSAGE_KEY`) for your 422
 - **No table creation or migration** — you run the DDL; existing tables are not upgraded (see "The Table")
 - **No query execution in `AclFilter`** — it builds `dbquery` objects only
 - **No level beyond `view`, `edit`, `all`**, and no deny entries
-- **No locking** — there is no row lock around the read in `check()` or `isLastFullEntry()`
+- **No locking** — there is no row lock around the read in `check()`, `isLastFullEntry()`, `keepsFullEntryWith()` or `keepsFullEntryWithout()`
 
 ---
 

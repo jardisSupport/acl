@@ -52,6 +52,10 @@ public function removeRecord(int $kind, int $recordId): int
 public function reassignGroup(int $from, int $to): int
 public function hasEntriesOfGroup(int $group): bool
 public function entriesOf(int $kind, int $recordId): array                        // @return list<Entry>, ordered by group
+public function keepsFullEntryWith(int $kind, int $recordId, array $entries): bool   // @param list<Entry>
+public function keepsFullEntryWithout(int $kind, int $recordId, array $groups): bool // @param list<int>
+public function revokeAll(int $kind, int $recordId, array $groups): void          // @param list<int>
+public function entriesOfWords(array $words): WordEntries                         // @param array<int, string> level word by group
 ```
 - `levelOf`: highest level any of the groups holds; `null` = no entry (also empty group list, unknown kind, unknown record).
 - `check`: from the same view as `levelOf` — `Granted` when `levelOf` ≥ required, `NotVisible` when `levelOf` is `null`, else `TooLow`. The caller branches on the result and never compares levels.
@@ -59,6 +63,10 @@ public function entriesOf(int $kind, int $recordId): array                      
 - `grantAll`: empty list writes nothing; a group named twice keeps the last level; an existing entry is overwritten; one statement per distinct group, no transaction.
 - `revoke`: removes the entry; a group without an entry is a no-op.
 - `isLastFullEntry`: true when the group holds level `all` on the record and no other group does.
+- `keepsFullEntryWith`: verdict over the state AFTER setting the entries: true exactly when at least one group then holds `all` (in the list or outside it; a group named twice counts with its last level). Reads, writes nothing. Use it, not `isLastFullEntry`, when a call names several groups.
+- `keepsFullEntryWithout`: verdict over the state AFTER removing the groups: true exactly when a group outside the list holds `all`; `[]` = present state. Reads, writes nothing.
+- `revokeAll`: removes the entries of the groups; unknown or doubled group harmless, `[]` writes nothing; one statement per 500 groups, no transaction.
+- `entriesOfWords`: pairs group -> word into `WordEntries` (`->entries` list<Entry> in pair order, `->invalid` list<int> groups whose word is not exactly `view|edit|all`); throws nothing, needs no database.
 - `removeRecord`: removes every entry of the record, returns how many.
 - `reassignGroup`: moves every entry of `$from` to `$to`, returns how many left `$from` (`$from === $to` → `0`); where `$to` already holds an entry on the record the higher level stays; batches of 500; several statements, no transaction.
 - `hasEntriesOfGroup`: true when at least one entry of any kind carries the group.
@@ -112,6 +120,9 @@ enum AccessDecision { case Granted; case NotVisible; case TooLow; }   // no back
 final readonly class Entry
 public function __construct(public int $group, public AccessLevel $level)
 
+final readonly class WordEntries
+public function __construct(public array $entries, public array $invalid)   // list<Entry>, list<int>
+
 final readonly class BackfillResult
 public function __construct(
     private int $written, private int $toFallback, private int $skipped,
@@ -129,7 +140,7 @@ public function __construct(public readonly int $withCreator)
 final class AclRule     // private constructor, constants only
 const NAME = 'LastFullEntryStays';  const MESSAGE_KEY = 'acl.lastFullEntry';
 ```
-`AclRule` names the rule "the last entry with level all stays" for the caller's 422; `acl` only answers the question (`isLastFullEntry`) and rejects nothing. The words `view`, `edit`, `all` are the one spelling for model, request body and OpenAPI.
+`AclRule` names the rule "the last entry with level all stays" for the caller's 422; `acl` only answers the question (`isLastFullEntry` for one group, `keepsFullEntryWith` / `keepsFullEntryWithout` over the state after the whole call) and rejects nothing. The words `view`, `edit`, `all` are the one spelling for model, request body and OpenAPI.
 
 ## USAGE
 ```php
@@ -148,7 +159,7 @@ $rows = (new DbQuery())->select('d.*')->from('documents', 'd')
 ```
 
 ## RULES
-- **No transaction of its own.** `grantAll`, `reassignGroup` and `AclBackfill::run` run several statements; the caller brackets them (`jardissupport/repository` `RunInTransaction`) when they must succeed or fail as a whole; a backfill pass: all `run` calls and `judge` in ONE bracket.
+- **No transaction of its own.** `grantAll`, `revokeAll`, `reassignGroup` and `AclBackfill::run` run several statements; the caller brackets them (`jardissupport/repository` `RunInTransaction`) when they must succeed or fail as a whole; a backfill pass: all `run` calls and `judge` in ONE bracket; a verdict (`keepsFullEntryWith` / `keepsFullEntryWithout`) and the write it guards in ONE bracket.
 - **Numbers only.** `acl` knows `int` kind, record, group and the three levels; who a group is, who holds which group and how a record is created is the caller's.
 - **Information kind comes first** in every key and every condition; a kind never reaches another kind's entries.
 - **Rejection is the caller's.** `AccessDecision` and `isLastFullEntry` answer; the status (403/404/422) is chosen by the caller (`AclRule` supplies name and message key).
@@ -162,5 +173,5 @@ $rows = (new DbQuery())->select('d.*')->from('documents', 'd')
 - No table creation or migration: the DDL ships in `resources/sql/`, the application runs it; an existing table does not get a new index by itself.
 - `AclFilter` runs no query (builds only); it has no connection.
 - No level other than `view`, `edit`, `all` (1, 2, 3); no deny or negative entries.
-- No locking: no row lock around the read in `isLastFullEntry` or `check`.
+- No locking: no row lock around the read in `isLastFullEntry`, `keepsFullEntryWith`, `keepsFullEntryWithout` or `check`.
 - No column or table names other than plain identifiers (table: optionally `schema.table`) for the entry table and for the backfill source.
