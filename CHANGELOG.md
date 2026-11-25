@@ -6,6 +6,14 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-11-25
+
+### Fixed
+
+- **README only, no code change.** The `keepsFullEntryWith()` example now states its real result (`true`: group 11 holds
+  `all`), the installation no longer asks for the GitHub source (the package is listed on Packagist), and the progress
+  example imports `BackfillResult`.
+
 ## [1.2.1] - 2026-11-25
 
 ### Fixed
