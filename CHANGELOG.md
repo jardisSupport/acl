@@ -14,7 +14,8 @@ versioning follows [SemVer](https://semver.org/).
   "created by" column holds `0` for "no signed-in person"; it was taken for a creator, never resolved, and `judge()`
   refused the pass although a fallback group existed. Now such records go to the fallback group (or are skipped
   without one) and are not counted by `BackfillResult::withCreator()`. No new parameter, no API change; one
-  condition in `Handler/Backfill/BackfillEntries`.
+  condition in `Handler/Backfill/BackfillEntries`. The creator arrives as text, so a text creator column holding
+  `'0'` also counts as "no creator".
 
 ## [1.2.0] - 2026-11-25
 
