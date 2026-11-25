@@ -127,7 +127,7 @@ $result = (new AclBackfill($connection))->run(
 $result->written();     // entries written
 $result->toFallback();  // of those, given to the fallback group
 $result->skipped();     // records left without an entry (no creator group and no fallback group)
-$result->withCreator(); // records met that carry a creator (not null, not '')
+$result->withCreator(); // records met that carry a creator (not null, not '', not 0 - also not the text '0')
 $result->resolved();    // of those, the ones that got the group of their creator
 ```
 

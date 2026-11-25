@@ -698,6 +698,52 @@ abstract class AclBackfillTestCase extends TestCase
         self::assertSame(4, $this->entryRows());
     }
 
+    // E5-M1-1: 0 in a whole-number creator column means "no creator", like null and the empty text
+
+    public function testZeroInAWholeNumberCreatorColumnGoesToTheFallbackGroupWithoutVerdict(): void
+    {
+        RecordTable::sources($this->connection, [[1, 0, 't1'], [2, 0, 't1'], [3, 0, 't2']], 'acl_src', 'BIGINT', 'INTEGER');
+
+        $result = $this->runBackfill();
+
+        self::assertSame([3, 3, 0, 0], [$result->written(), $result->toFallback(), $result->skipped(), $result->withCreator()]);
+        foreach ([1, 2, 3] as $id) {
+            self::assertSame([self::FALLBACK => 3], $this->levels(self::KIND_A, $id));
+        }
+        self::assertSame([], $this->calls);
+        $this->backfill->judge($result);
+    }
+
+    public function testZeroNextToARealCreatorOnlyTheRealOneIsResolved(): void
+    {
+        RecordTable::sources($this->connection, [[1, 0, 't1'], [2, 42, 't1'], [3, 0, 't1']], 'acl_src', 'BIGINT', 'INTEGER');
+        $closure = function (?string $tenant, array $creators): array {
+            $this->calls[] = [$tenant, $creators];
+
+            return ['42' => 142];
+        };
+
+        $result = $this->backfill->run(self::KIND_A, 'acl_src', 'id', 'created_by', 'tenant', $closure, self::FALLBACK);
+
+        self::assertSame([['t1', ['42']]], $this->calls);
+        self::assertSame([142 => 3], $this->levels(self::KIND_A, 2));
+        self::assertSame([self::FALLBACK => 3], $this->levels(self::KIND_A, 1));
+        self::assertSame([self::FALLBACK => 3], $this->levels(self::KIND_A, 3));
+        self::assertSame([3, 2, 0, 1, 1], [$result->written(), $result->toFallback(), $result->skipped(), $result->withCreator(), $result->resolved()]);
+        $this->backfill->judge($result);
+    }
+
+    public function testZeroWithoutFallbackGroupIsSkippedAndThePassIsNotRefused(): void
+    {
+        RecordTable::sources($this->connection, [[1, 0, 't1'], [2, 0, 't2'], [3, 0, 't1']], 'acl_src', 'BIGINT', 'INTEGER');
+
+        $result = $this->runBackfill(null);
+
+        self::assertSame([0, 3, 0], [$result->written(), $result->skipped(), $result->withCreator()]);
+        $this->backfill->judge($result);
+        self::assertSame(0, $this->entryRows());
+    }
+
     public function testRecordsWithoutCreatorAndWithoutFallbackAreSkippedWithoutVerdict(): void
     {
         RecordTable::sources($this->connection, [[1, null, 't1'], [2, '', 't1']]);
