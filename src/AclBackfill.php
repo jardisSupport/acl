@@ -48,8 +48,9 @@ final class AclBackfill
      * The group is the one $groupOfCreator names for the record's creator (from $creatorColumn, per tenant from
      * $tenantColumn, one call per tenant and batch with the creators seen there; returns group by creator). A
      * record without a creator, or whose creator the closure does not know, goes to $fallbackGroup; without a
-     * fallback group it is skipped and stays without an entry. Records with an entry are never touched, so a
-     * second run writes nothing. $batch bounds the records read and written at once.
+     * fallback group it is skipped and stays without an entry. "Without a creator" is a $creatorColumn that holds
+     * null, the empty text or 0 (the empty value of a whole-number column). Records with an entry are never
+     * touched, so a second run writes nothing. $batch bounds the records read and written at once.
      *
      * $fallbackGroup is a number, or a closure that names the fallback group of a tenant (null: none, the records
      * of that tenant are skipped). The closure is asked at most once per tenant and batch, and only when a record
