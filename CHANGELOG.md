@@ -6,6 +6,18 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-25
+
+### Added
+
+- **`AclBackfill::run(..., int $batch = 1000, ?Closure $progress = null)`** — optional last argument
+  `Closure(BackfillResult): void`. After each page that was read and written, the closure gets a `BackfillResult` with
+  the running totals up to and including that page (the last call equals the returned result). It names no total and no
+  duration: the number of records is not known beforehand. Without a closure `run` behaves as before; an empty source
+  does not call it; an exception thrown by it flies through and is not swallowed. Closure `Handler/Backfill/BackfillEntries`.
+
+## [1.1.0] - 2026-11-24
+
 ### Added
 
 - **`AclStore::keepsFullEntryWith(int $kind, int $recordId, list<Entry> $entries): bool`** — the verdict over the state

@@ -131,6 +131,14 @@ $result->withCreator(); // records met that carry a creator (not null, not '')
 $result->resolved();    // of those, the ones that got the group of their creator
 ```
 
+**Progress while it runs.** The optional last argument `$progress` (`Closure(BackfillResult): void`) is called after each page that was read and written, with the running totals up to there; the last call equals the returned result. There is no total and no duration to show, since the number of records is not known beforehand. An empty source never calls it; an exception thrown by the closure is not caught:
+
+```php
+$backfill->run(7, 'documents', 'id', 'created_by', 'tenant_id', $lookup, 1, 1000, function (BackfillResult $done): void {
+    fwrite(STDERR, sprintf("%d entries written so far\n", $done->written()));
+});
+```
+
 Every record without an entry gets one entry `all`. Records that have an entry are never touched, so a second run writes nothing. A fallback closure is asked at most once per tenant and batch, and only when a record of that tenant needs it; it returns `null` for a tenant without a fallback group, whose records are then skipped.
 
 **Verdict over a whole pass.** Several source tables, one `run` each; afterwards `judge` gets all results and refuses the pass when records with a creator were met and not one creator resolved to a group (the creator lookup found nothing). One resolved creator, or no record with a creator, lets the pass stand:

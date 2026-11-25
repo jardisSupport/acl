@@ -55,8 +55,16 @@ final class AclBackfill
      * of that tenant are skipped). The closure is asked at most once per tenant and batch, and only when a record
      * of that tenant needs it. The run never throws a verdict; {@see judge()} gives it.
      *
+     * $progress (optional, last argument) is called after each page that was read and written, with a
+     * BackfillResult of the running totals up to and including that page (the last call equals the returned
+     * result). A source without records calls it never. It changes nothing in the result or in the transaction
+     * promises (the run opens none); an exception thrown by it is not caught and ends the run, the caller's
+     * bracket decides about the rows written so far. It names no total and no duration: the number of records
+     * is not known beforehand.
+     *
      * @param Closure(?string, list<string>): array<string, int> $groupOfCreator
      * @param int|Closure(?string): ?int|null $fallbackGroup
+     * @param (Closure(BackfillResult): void)|null $progress
      */
     public function run(
         int $kind,
@@ -67,6 +75,7 @@ final class AclBackfill
         Closure $groupOfCreator,
         int|Closure|null $fallbackGroup,
         int $batch = 1000,
+        ?Closure $progress = null,
     ): BackfillResult {
         return ($this->backfillEntries)(
             $kind,
@@ -77,6 +86,7 @@ final class AclBackfill
             $groupOfCreator,
             $fallbackGroup,
             $batch,
+            $progress,
         );
     }
 

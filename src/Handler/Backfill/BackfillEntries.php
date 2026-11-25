@@ -18,6 +18,9 @@ use JardisSupport\Acl\Data\BackfillResult;
  * Works in key order and batch by batch, so skipped records (which stay without an entry) are passed over and
  * a large table never sits in memory at once. Existing entries stay: only records without one are touched.
  * Opens no transaction of its own; the caller brackets the call. Names are validated before anything runs.
+ *
+ * An optional progress closure is called after each page that was read and written, with the running totals up to
+ * there; an exception from it flies through. An empty source calls it never.
  */
 final class BackfillEntries
 {
@@ -32,6 +35,7 @@ final class BackfillEntries
     /**
      * @param Closure(?string, list<string>): array<string, int> $groupOfCreator
      * @param int|Closure(?string): ?int|null $fallbackGroup
+     * @param (Closure(BackfillResult): void)|null $progress
      */
     public function __invoke(
         int $kind,
@@ -42,6 +46,7 @@ final class BackfillEntries
         Closure $groupOfCreator,
         int|Closure|null $fallbackGroup,
         int $batch,
+        ?Closure $progress = null,
     ): BackfillResult {
         $this->assertInput($sourceTable, $keyColumn, $creatorColumn, $tenantColumn, $batch);
 
@@ -73,6 +78,9 @@ final class BackfillEntries
             $withCreator += $placed['withCreator'];
             $resolved += $placed['resolved'];
             $afterKey = $records === [] ? $afterKey : $records[array_key_last($records)]['key'];
+            if ($progress !== null && $records !== []) {
+                $progress(new BackfillResult($written, $toFallback, $skipped, $withCreator, $resolved));
+            }
         } while (count($records) === $batch);
 
         return new BackfillResult($written, $toFallback, $skipped, $withCreator, $resolved);
