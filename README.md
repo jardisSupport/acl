@@ -28,13 +28,6 @@
 composer require jardissupport/acl
 ```
 
-Until the package is listed on Packagist, add the GitHub source first:
-
-```bash
-composer config repositories.acl vcs https://github.com/jardisSupport/acl
-composer require jardissupport/acl:^1.0
-```
-
 Create the table once with the file of your dialect from `resources/sql/` (`mysql.sql`, `pgsql.sql`, `sqlite.sql`), or the equivalent in your own migration.
 
 ---
@@ -82,7 +75,7 @@ $words = $store->entriesOfWords([10 => 'view', 11 => 'all', 12 => '', 13 => 'ALL
 $words->entries;   // [Entry(10, View), Entry(11, All)]
 $words->invalid;   // [12, 13] - the groups whose word is none of view, edit, all (nothing is thrown, no database needed)
 
-$store->keepsFullEntryWith(7, 1001, $words->entries);   // false: after setting these, no group holds "all" any more
+$store->keepsFullEntryWith(7, 1001, $words->entries);   // true: after setting these, group 11 holds "all"
 $store->keepsFullEntryWithout(7, 1001, [10, 11]);       // false: after removing groups 10 and 11, no group holds "all"
 $store->revokeAll(7, 1001, [10, 11]);                   // removes the entries of both groups; unknown groups and [] are harmless
 ```
@@ -134,6 +127,8 @@ $result->resolved();    // of those, the ones that got the group of their creato
 **Progress while it runs.** The optional last argument `$progress` (`Closure(BackfillResult): void`) is called after each page that was read and written, with the running totals up to there; the last call equals the returned result. There is no total and no duration to show, since the number of records is not known beforehand. An empty source never calls it; an exception thrown by the closure is not caught:
 
 ```php
+use JardisSupport\Acl\Data\BackfillResult;
+
 $backfill->run(7, 'documents', 'id', 'created_by', 'tenant_id', $lookup, 1, 1000, function (BackfillResult $done): void {
     fwrite(STDERR, sprintf("%d entries written so far\n", $done->written()));
 });
