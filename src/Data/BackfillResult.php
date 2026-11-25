@@ -37,7 +37,7 @@ final readonly class BackfillResult
         return $this->skipped;
     }
 
-    /** Records the run looked at that carry a creator (not null, not an empty string), whatever became of them. */
+    /** Records the run looked at that carry a creator (not null, not an empty string, not 0), whatever became of them. */
     public function withCreator(): int
     {
         return $this->withCreator;

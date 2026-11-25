@@ -131,7 +131,7 @@ final class BackfillEntries
         ];
 
         foreach ($records as $record) {
-            $hasCreator = $record['creator'] !== null && $record['creator'] !== '';
+            $hasCreator = $this->hasCreator($record['creator']);
             $group = $hasCreator
                 ? ($groupsByCreator[$this->tenantKey($record['tenant'])][$record['creator']] ?? null)
                 : null;
@@ -187,7 +187,7 @@ final class BackfillEntries
         $creators = [];
         $tenants = [];
         foreach ($records as $record) {
-            if ($record['creator'] === null || $record['creator'] === '') {
+            if (!$this->hasCreator($record['creator'])) {
                 continue;
             }
             $tenants[$this->tenantKey($record['tenant'])] = $record['tenant'];
@@ -203,6 +203,16 @@ final class BackfillEntries
         }
 
         return $groups;
+    }
+
+    /**
+     * Whether a record names a creator. The one place that answers it: null, the empty text and "0" mean nobody.
+     * "0" is what a whole-number creator column holds for "no signed-in person"; the finder hands every creator
+     * over as text, so the whole number 0 arrives as "0" in every dialect.
+     */
+    private function hasCreator(?string $creator): bool
+    {
+        return $creator !== null && $creator !== '' && $creator !== '0';
     }
 
     /** Array key for a tenant; keeps "no tenant" apart from the tenant "". */

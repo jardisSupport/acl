@@ -24,24 +24,29 @@ final class RecordTable
     /**
      * Table of existing records with creator and tenant, for the backfill.
      *
-     * @param list<array{0: int, 1: ?string, 2: ?string}> $rows id, creator, tenant
+     * @param list<array{0: int, 1: string|int|null, 2: ?string}> $rows id, creator, tenant
      * @param string $table acl_src, or acl_src2 for a second source table
      * @param string $keyType integer type of the key column: SMALLINT, INTEGER or BIGINT
+     * @param string $creatorType type of the creator column: VARCHAR(40) or INTEGER (holds 0 for "nobody")
      */
     public static function sources(
         DbConnectionInterface $connection,
         array $rows,
         string $table = 'acl_src',
         string $keyType = 'BIGINT',
+        string $creatorType = 'VARCHAR(40)',
     ): void {
         self::assertSourceName($table);
         if (!in_array($keyType, ['SMALLINT', 'INTEGER', 'BIGINT'], true)) {
             throw new \InvalidArgumentException('Unknown key type ' . $keyType);
         }
+        if (!in_array($creatorType, ['VARCHAR(40)', 'INTEGER'], true)) {
+            throw new \InvalidArgumentException('Unknown creator type ' . $creatorType);
+        }
         $pdo = $connection->pdo();
         $pdo->exec('DROP TABLE IF EXISTS ' . $table);
         $pdo->exec(
-            'CREATE TABLE ' . $table . ' (id ' . $keyType . ' NOT NULL PRIMARY KEY, created_by VARCHAR(40) NULL, '
+            'CREATE TABLE ' . $table . ' (id ' . $keyType . ' NOT NULL PRIMARY KEY, created_by ' . $creatorType . ' NULL, '
             . 'tenant VARCHAR(40) NULL)'
         );
         $pdo->beginTransaction();
